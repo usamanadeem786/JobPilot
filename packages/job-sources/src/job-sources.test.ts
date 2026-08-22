@@ -365,3 +365,70 @@ describe('searchAllSources', () => {
     ]);
   });
 });
+
+describe('result budget fairness', () => {
+  it('does not let the first source consume the whole limit', async () => {
+    // Found against live data: with several boards configured, the first one
+    // returned every job and the rest silently contributed nothing, so the
+    // dashboard showed a single employer.
+    const busy = {
+      key: 'busy',
+      displayName: 'Busy',
+      kind: 'ATS_BOARD',
+      termsUrl: '',
+      capabilities: new GreenhouseAdapter().capabilities,
+      isConfigured: () => true,
+      searchJobs: (query: { limit: number }) =>
+        Promise.resolve(
+          Array.from({ length: query.limit }, (_, index) =>
+            job({ sourceKey: 'busy', externalJobId: `b-${index}`, companyName: `Busy ${index}` }),
+          ),
+        ),
+      healthCheck: () => Promise.resolve({ healthy: true, detail: '', checkedAt: new Date() }),
+    } as unknown as ReturnType<typeof createDefaultAdapters>[number];
+
+    const quiet = {
+      ...busy,
+      key: 'quiet',
+      displayName: 'Quiet',
+      searchJobs: () => Promise.resolve([job({ sourceKey: 'quiet', externalJobId: 'q-1', companyName: 'Quiet Co' })]),
+    } as unknown as ReturnType<typeof createDefaultAdapters>[number];
+
+    const outcome = await searchAllSources([busy, quiet], {
+      query: { keywords: '', limit: 10 },
+      config: {},
+      logger: silentLogger,
+      userAgent: 'test',
+    });
+
+    expect(outcome.sourcesSearched).toEqual(['busy', 'quiet']);
+    // The quiet source must still have been asked, and its result kept.
+    expect(outcome.dedupe.unique.some((entry) => entry.sourceKey === 'quiet')).toBe(true);
+    expect(outcome.jobs.length).toBeLessThanOrEqual(10);
+  });
+
+  it('applies the limit after deduplication, not while collecting', async () => {
+    const duplicating = {
+      ...new GreenhouseAdapter(),
+      key: 'dupes',
+      isConfigured: () => true,
+      searchJobs: () =>
+        Promise.resolve([
+          job({ externalJobId: '1', title: 'Same Role' }),
+          job({ externalJobId: '2', title: 'Same Role' }),
+          job({ externalJobId: '3', title: 'Different Role' }),
+        ]),
+      healthCheck: () => Promise.resolve({ healthy: true, detail: '', checkedAt: new Date() }),
+    } as unknown as ReturnType<typeof createDefaultAdapters>[number];
+
+    const outcome = await searchAllSources([duplicating], {
+      query: { keywords: '', limit: 2 },
+      config: {},
+      logger: silentLogger,
+      userAgent: 'test',
+    });
+
+    // Two unique jobs survive dedupe; the budget was not spent on the duplicate.
+    expect(outcome.jobs).toHaveLength(2);
+  });
+});

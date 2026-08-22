@@ -69,8 +69,13 @@ export class GreenhouseAdapter implements JobSourceAdapter {
     const tokens = boardTokens(context.config);
     const results: NormalisedJob[] = [];
 
+    // Each board gets an equal share of the limit. Taking them first-come
+    // instead lets one large employer consume the entire budget, so every
+    // other configured board silently returns nothing.
+    const perBoard = Math.max(1, Math.ceil(query.limit / Math.max(1, tokens.length)));
+
     for (const token of tokens) {
-      if (results.length >= query.limit) break;
+      let fromThisBoard = 0;
 
       try {
         // `content=true` returns the full description in the list response,
@@ -81,9 +86,12 @@ export class GreenhouseAdapter implements JobSourceAdapter {
         );
 
         for (const job of response.jobs ?? []) {
+          if (fromThisBoard >= perBoard) break;
           const normalised = this.normalise(job, token);
-          if (matchesQuery(normalised, query)) results.push(normalised);
-          if (results.length >= query.limit) break;
+          if (matchesQuery(normalised, query)) {
+            results.push(normalised);
+            fromThisBoard += 1;
+          }
         }
       } catch (error) {
         // One employer's board being unavailable must not fail the search.

@@ -124,13 +124,19 @@ export async function searchAllSources(
 
   options.onProgress?.({ type: 'deduplicating', total: collected.length });
   const dedupe = deduplicateJobs(collected);
+
+  // The overall limit is applied AFTER deduplication, not while collecting.
+  // Truncating first would spend the budget on duplicates and starve whichever
+  // sources ran last.
+  const jobs = dedupe.unique.slice(0, options.query.limit);
+
   options.onProgress?.({
     type: 'completed',
-    unique: dedupe.unique.length,
+    unique: jobs.length,
     removed: dedupe.duplicatesRemoved,
   });
 
-  return { jobs: dedupe.unique, dedupe, sourcesSearched, sourcesFailed, sourcesSkipped };
+  return { jobs, dedupe, sourcesSearched, sourcesFailed, sourcesSkipped };
 }
 
 /** Reads source configuration out of the process environment. */

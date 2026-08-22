@@ -67,10 +67,14 @@ export class LeverAdapter implements JobSourceAdapter {
   }
 
   async searchJobs(query: NormalisedQuery, context: SourceContext): Promise<NormalisedJob[]> {
+    const slugs = companySlugs(context.config);
     const results: NormalisedJob[] = [];
 
-    for (const slug of companySlugs(context.config)) {
-      if (results.length >= query.limit) break;
+    // Fair share per company, for the same reason as Greenhouse.
+    const perCompany = Math.max(1, Math.ceil(query.limit / Math.max(1, slugs.length)));
+
+    for (const slug of slugs) {
+      let fromThisCompany = 0;
 
       try {
         const postings = await context.http.getJson<readonly LeverPosting[]>(
@@ -79,9 +83,12 @@ export class LeverAdapter implements JobSourceAdapter {
         );
 
         for (const posting of postings) {
+          if (fromThisCompany >= perCompany) break;
           const normalised = this.normalise(posting, slug);
-          if (matchesQuery(normalised, query)) results.push(normalised);
-          if (results.length >= query.limit) break;
+          if (matchesQuery(normalised, query)) {
+            results.push(normalised);
+            fromThisCompany += 1;
+          }
         }
       } catch (error) {
         context.logger.warn('Lever board unavailable', {
