@@ -24,10 +24,17 @@ a job search. Those need a process that outlives a request.
 
 A working split:
 
-- **`apps/web` → Vercel.** Set the project root to `apps/web`, install with
-  `pnpm install`, build with `pnpm --filter @jobpilot/web build`. Set
-  `NEXT_PUBLIC_API_URL` to the deployed API's URL — it is inlined at build time,
-  so it must be set before the build, and changing it requires a redeploy.
+- **`apps/web` → Vercel.** Push the repository to GitHub, then *Add New →
+  Project* in the Vercel dashboard and import it. The root `vercel.json`
+  already sets the framework, install command and build command (it builds
+  `@jobpilot/shared` first, which the web app imports). The one thing the file
+  cannot set is **Root Directory** — choose `apps/web` in the import dialog.
+
+  Set `NEXT_PUBLIC_API_URL` to the deployed API's URL under *Settings →
+  Environment Variables* **before the first build**: `NEXT_PUBLIC_*` values are
+  inlined into the client bundle at build time, so changing one later requires
+  a redeploy, not just a restart. Until it points at a running API, the site
+  renders but sign-in fails — the browser has nothing to authenticate against.
 - **`apps/api` + `apps/workers` → Railway, Render, Fly.io, or any container
   platform.** Build from `apps/api/Dockerfile`.
 - **PostgreSQL → Neon, Supabase, Railway or RDS.** Confirm `pgvector` is
