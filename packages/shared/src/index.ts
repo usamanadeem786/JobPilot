@@ -6,3 +6,4 @@ export * from './profile';
 export * from './jobs';
 export * from './applications';
 export * from './outreach';
+export * from './analytics';

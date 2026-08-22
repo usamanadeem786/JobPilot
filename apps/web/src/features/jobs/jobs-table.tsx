@@ -24,7 +24,7 @@ import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { buildJobColumns, JOB_COLUMN_LABELS, type JobColumnActions } from './columns';
-import { downloadCsv, jobsToCsv } from './export';
+import { downloadCsv, downloadXlsx, jobsToCsv } from './export';
 
 export interface JobsTableProps {
   readonly jobs: readonly JobListItemDto[];
@@ -78,6 +78,12 @@ export function JobsTable(props: JobsTableProps): React.ReactElement {
   });
 
   const selectedIds = Object.keys(rowSelection).filter((id) => rowSelection[id]);
+
+  // Exports the selection when there is one, otherwise the visible page.
+  const exportRows = (): JobListItemDto[] =>
+    selectedIds.length > 0
+      ? props.jobs.filter((jobItem) => selectedIds.includes(jobItem.id))
+      : [...props.jobs];
   const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize));
 
   const toggleSort = (field: string): void => {
@@ -99,11 +105,12 @@ export function JobsTable(props: JobsTableProps): React.ReactElement {
         selectedCount={selectedIds.length}
         onClearSelection={() => setRowSelection({})}
         onExport={() => {
-          const rows =
-            selectedIds.length > 0
-              ? props.jobs.filter((jobItem) => selectedIds.includes(jobItem.id))
-              : props.jobs;
-          downloadCsv(`jobpilot-jobs-${new Date().toISOString().slice(0, 10)}.csv`, jobsToCsv(rows));
+          const stamp = new Date().toISOString().slice(0, 10);
+          downloadCsv(`jobpilot-jobs-${stamp}.csv`, jobsToCsv(exportRows()));
+        }}
+        onExportExcel={() => {
+          const stamp = new Date().toISOString().slice(0, 10);
+          void downloadXlsx(`jobpilot-jobs-${stamp}.xlsx`, exportRows());
         }}
         onBulkStatus={(status) => props.onBulkStatus(selectedIds, status)}
         onBulkGenerateCv={() => props.onBulkGenerateCv(selectedIds)}
@@ -222,6 +229,7 @@ interface ToolbarProps {
   readonly selectedCount: number;
   onClearSelection(): void;
   onExport(): void;
+  onExportExcel(): void;
   onBulkStatus(status: JobListItemDto['status']): void;
   onBulkGenerateCv(): void;
   readonly showColumns: boolean;
@@ -295,7 +303,11 @@ function Toolbar(props: ToolbarProps): React.ReactElement {
           </Button>
           <Button variant="outline" size="sm" onClick={props.onExport}>
             <Download className="size-4" aria-hidden />
-            Export CSV
+            CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={props.onExportExcel}>
+            <Download className="size-4" aria-hidden />
+            Excel
           </Button>
         </div>
       </div>

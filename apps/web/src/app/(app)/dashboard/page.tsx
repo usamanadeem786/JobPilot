@@ -1,33 +1,32 @@
 'use client';
 
-import type { UserProfileDto } from '@jobpilot/shared';
+import {
+  applicationFunnel,
+  bySource,
+  formatRate,
+  scoreDistribution,
+  summarise,
+  toDailySeries,
+  type ApplicationLike,
+  type JobListItemDto,
+  type Paginated,
+  type UserProfileDto,
+} from '@jobpilot/shared';
 import { useQuery } from '@tanstack/react-query';
-import { Briefcase, FileText, Send, Users } from 'lucide-react';
 import * as React from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { BarList, SparkBars, StatCard } from '@/features/analytics/charts';
 import { useAuth } from '@/features/auth/auth-provider';
-import { apiFetch, ApiError } from '@/lib/api-client';
-
-interface StatCard {
-  readonly key: string;
-  readonly label: string;
-  readonly icon: React.ComponentType<{ className?: string }>;
-  readonly phase: string;
-}
+import { ApiError, apiFetch } from '@/lib/api-client';
 
 /**
- * The dashboard's numbers come from features that land in later phases. Rather
- * than invent placeholder figures, each card states which phase fills it in —
- * a fake "0" would be indistinguishable from a real one.
+ * The dashboard.
+ *
+ * Metrics come from the shared analytics functions — the same code the API and
+ * the export use — so three places cannot end up disagreeing about what
+ * "applications" means.
  */
-const PENDING_STATS: readonly StatCard[] = [
-  { key: 'jobs', label: 'Jobs discovered', icon: Briefcase, phase: 'Phase 3' },
-  { key: 'cvs', label: 'CVs generated', icon: FileText, phase: 'Phase 6' },
-  { key: 'applications', label: 'Applications', icon: Send, phase: 'Phase 7' },
-  { key: 'contacts', label: 'Contacts found', icon: Users, phase: 'Phase 8' },
-];
-
 export default function DashboardPage(): React.ReactElement {
   const { user } = useAuth();
 
@@ -36,99 +35,127 @@ export default function DashboardPage(): React.ReactElement {
     queryFn: () => apiFetch<UserProfileDto>('/users/me/profile'),
   });
 
+  const jobsQuery = useQuery({
+    queryKey: ['dashboard-jobs'],
+    queryFn: () => apiFetch<Paginated<JobListItemDto>>('/jobs?pageSize=100&includeArchived=true'),
+  });
+
+  const jobs = React.useMemo(() => jobsQuery.data?.items ?? [], [jobsQuery.data]);
+
+  // Applications have no storage yet, so the pipeline shows its empty state
+  // rather than numbers derived from something else and presented as real.
+  const applications = React.useMemo<ApplicationLike[]>(() => [], []);
+
+  const summary = React.useMemo(() => summarise(jobs, applications), [jobs, applications]);
+  const discovered = React.useMemo(
+    () => toDailySeries(jobs.map((job) => job.discoveredAt), { days: 30 }),
+    [jobs],
+  );
+  const scores = React.useMemo(() => scoreDistribution(jobs), [jobs]);
+  const sources = React.useMemo(() => bySource(jobs), [jobs]);
+  const funnel = React.useMemo(() => applicationFunnel(applications), [applications]);
+
+  const name = profileQuery.data?.fullName ?? user?.email ?? 'there';
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <header className="flex flex-col gap-1">
+      <header>
         <h1 className="text-2xl font-semibold tracking-tight">
-          {profileQuery.isPending ? (
-            <Skeleton className="h-8 w-64" />
-          ) : (
-            `Welcome, ${profileQuery.data?.fullName ?? user?.email ?? 'there'}`
-          )}
+          {profileQuery.isPending ? <Skeleton className="h-8 w-64" /> : `Welcome, ${name}`}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Your account is set up. Job search and CV tailoring arrive in the next phases.
+          Everything discovered from your configured sources, at a glance.
         </p>
       </header>
 
-      {profileQuery.isError && (
+      {jobsQuery.isError ? (
         <div
           role="alert"
           className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
         >
-          {profileQuery.error instanceof ApiError
-            ? profileQuery.error.message
-            : 'Could not load your profile.'}
+          {jobsQuery.error instanceof ApiError ? jobsQuery.error.message : 'Could not load your dashboard.'}
         </div>
-      )}
+      ) : null}
 
-      <section aria-label="Overview" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {PENDING_STATS.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <Card key={stat.key}>
-              <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  {stat.label}
-                </CardTitle>
-                <Icon className="size-4 text-muted-foreground" aria-hidden />
+      {jobsQuery.isPending ? (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, index) => (
+            <Skeleton key={index} className="h-24 w-full" />
+          ))}
+        </div>
+      ) : (
+        <>
+          <section aria-label="Overview" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Total jobs" value={summary.totalJobs} />
+            <StatCard label="New" value={summary.newJobs} />
+            <StatCard label="Shortlisted" value={summary.shortlisted} />
+            <StatCard label="CVs generated" value={summary.cvsGenerated} />
+            <StatCard label="Applications" value={summary.applications} />
+            <StatCard label="Interviews" value={summary.interviews} />
+            <StatCard label="Offers" value={summary.offers} tone="success" />
+            {/* An em dash rather than 0% when there is nothing to divide by:
+                "0%" is a claim about performance, and a wrong one. */}
+            <StatCard
+              label="Interview rate"
+              value={formatRate(summary.interviewRate)}
+              hint={summary.interviewRate === null ? 'No applications yet' : 'Of applications sent'}
+              tone={summary.interviewRate === null ? 'muted' : 'default'}
+            />
+          </section>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Jobs discovered, last 30 days</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-semibold tabular-nums text-muted-foreground">—</p>
-                <p className="mt-1 text-xs text-muted-foreground">Available in {stat.phase}</p>
+                <SparkBars points={discovered} label="Jobs discovered" />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {discovered.reduce((total, point) => total + point.count, 0)} in the last 30 days
+                </p>
               </CardContent>
             </Card>
-          );
-        })}
-      </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Your profile</CardTitle>
-          <CardDescription>
-            Used to rank jobs and to fill in your details when tailoring a CV.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {profileQuery.isPending ? (
-            <div className="flex flex-col gap-3">
-              <Skeleton className="h-4 w-48" />
-              <Skeleton className="h-4 w-64" />
-              <Skeleton className="h-4 w-40" />
-            </div>
-          ) : profileQuery.data ? (
-            <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
-              <Detail label="Name" value={profileQuery.data.fullName} />
-              <Detail label="Email" value={user?.email ?? null} />
-              <Detail label="Headline" value={profileQuery.data.headline} />
-              <Detail
-                label="Location"
-                value={
-                  [profileQuery.data.locationCity, profileQuery.data.locationCountry]
-                    .filter(Boolean)
-                    .join(', ') || null
-                }
-              />
-              <Detail
-                label="Skills"
-                value={
-                  profileQuery.data.skills.length > 0 ? profileQuery.data.skills.join(', ') : null
-                }
-              />
-              <Detail label="Remote preference" value={profileQuery.data.remotePreference} />
-            </dl>
-          ) : null}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Match score distribution</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <BarList
+                  buckets={scores.buckets}
+                  emptyMessage="No jobs have been analysed yet."
+                  {...(scores.unscored > 0
+                    ? {
+                        footnote: `${scores.unscored} job${scores.unscored === 1 ? '' : 's'} not yet analysed.`,
+                      }
+                    : {})}
+                />
+              </CardContent>
+            </Card>
 
-function Detail({ label, value }: { label: string; value: string | null }): React.ReactElement {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="text-sm">{value ?? <span className="text-muted-foreground">Not set</span>}</dd>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Jobs by source</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <BarList buckets={sources} emptyMessage="No sources have returned jobs yet." />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Application pipeline</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <BarList
+                  buckets={funnel}
+                  emptyMessage="No applications tracked yet. Apply to a job to start the pipeline."
+                />
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -44,7 +44,7 @@ const COLUMNS: readonly { header: string; value: (job: JobListItemDto) => string
  * parties, so they are exactly the untrusted input that attack needs.
  */
 export function escapeCsvField(value: string): string {
-  const neutralised = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  const neutralised = neutraliseFormula(value);
   return `"${neutralised.replace(/"/g, '""')}"`;
 }
 
@@ -72,5 +72,69 @@ export function downloadCsv(filename: string, csv: string): void {
 
   // Revoked on the next tick: revoking synchronously can cancel the download
   // in some browsers before it starts.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/**
+ * Excel export.
+ *
+ * ExcelJS is loaded with a dynamic import so its considerable weight is only
+ * paid by someone who actually clicks the button, rather than by every visitor
+ * who loads the jobs page. CSV covers the common case and costs nothing.
+ */
+export async function downloadXlsx(filename: string, jobs: readonly JobListItemDto[]): Promise<void> {
+  const ExcelJS = await import('exceljs');
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'JobPilot';
+  workbook.created = new Date();
+
+  const sheet = workbook.addWorksheet('Jobs', {
+    // Freezing the header keeps it visible while scrolling a few hundred rows,
+    // which is the normal size of a search.
+    views: [{ state: 'frozen', ySplit: 1 }],
+  });
+
+  sheet.columns = COLUMNS.map((column) => ({
+    header: column.header,
+    key: column.header,
+    width: Math.min(48, Math.max(12, column.header.length + 6)),
+  }));
+
+  sheet.getRow(1).font = { bold: true };
+
+  for (const job of jobs) {
+    // The same CSV-injection defence applies: Excel evaluates a leading =, +,
+    // - or @ as a formula, and these values come from third-party job boards.
+    sheet.addRow(COLUMNS.map((column) => neutraliseFormula(column.value(job) ?? '')));
+  }
+
+  sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: COLUMNS.length } };
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  downloadBlob(
+    filename,
+    new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }),
+  );
+}
+
+/** Shared by both exports: a leading formula character is neutralised. */
+export function neutraliseFormula(value: string): string {
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
+function downloadBlob(filename: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.style.display = 'none';
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
