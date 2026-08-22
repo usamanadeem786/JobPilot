@@ -9,3 +9,4 @@ export { PartnerApiAdapter, LINKEDIN, INDEED, GLASSDOOR } from './adapters/partn
 export * from './clean';
 export * from './html';
 export * from './apply/adapter';
+export * from './contacts/discover';
