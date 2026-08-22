@@ -7,3 +7,4 @@ export { GreenhouseAdapter } from './adapters/greenhouse';
 export { LeverAdapter } from './adapters/lever';
 export { PartnerApiAdapter, LINKEDIN, INDEED, GLASSDOOR } from './adapters/partner';
 export * from './clean';
+export * from './html';

@@ -432,3 +432,39 @@ describe('result budget fairness', () => {
     expect(outcome.jobs).toHaveLength(2);
   });
 });
+
+describe('htmlToText on real board content', () => {
+  it('handles HTML-ESCAPED descriptions, which Greenhouse returns', () => {
+    // Found by looking at the rendered job detail panel: the description
+    // showed a literal <div class="content-intro">. Stripping tags before
+    // decoding entities meant the strip pass saw no tags, and the decode pass
+    // then created them.
+    const escaped = '&lt;div class="content-intro"&gt;&lt;p&gt;GitLab is a platform.&lt;/p&gt;&lt;/div&gt;';
+    const text = htmlToText(escaped);
+
+    expect(text).toBe('GitLab is a platform.');
+    expect(text).not.toContain('<');
+    expect(text).not.toContain('content-intro');
+  });
+
+  it('still handles ordinary unescaped HTML', () => {
+    expect(htmlToText('<p>We need:</p><ul><li>Python</li></ul>')).toContain('Python');
+    expect(htmlToText('<p>Hello</p>')).toBe('Hello');
+  });
+
+  it('handles content escaped twice over', () => {
+    expect(htmlToText('&amp;lt;p&amp;gt;Nested&amp;lt;/p&amp;gt;')).toBe('Nested');
+  });
+
+  it('decodes numeric and hex entities', () => {
+    expect(htmlToText('caf&#233; &#x26; bar')).toBe('café & bar');
+  });
+
+  it('drops control characters rather than emitting them', () => {
+    expect(htmlToText('a&#1;b')).toBe('a b');
+  });
+
+  it('keeps list items readable', () => {
+    expect(htmlToText('<ul><li>One</li><li>Two</li></ul>')).toContain('• One');
+  });
+});

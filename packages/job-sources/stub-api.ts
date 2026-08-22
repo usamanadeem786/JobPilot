@@ -12,7 +12,33 @@
  *   pnpm --filter @jobpilot/job-sources exec tsx stub-api.ts
  */
 import { createServer } from 'node:http';
+import { analyseHeuristically, type JobAnalysis } from '@jobpilot/ai';
+import { CvDocumentSchema, type CvDocument } from '@jobpilot/cv';
 import { createDefaultAdapters, searchAllSources, type NormalisedJob } from './src/index';
+
+/** A stand-in master CV, so scores are computed against something real. */
+const SAMPLE_CV: CvDocument = CvDocumentSchema.parse({
+  personal: {
+    fullName: 'Usama Nadeem',
+    headline: 'Senior Python Backend Developer',
+    location: 'Lahore, Pakistan',
+  },
+  summary: 'Backend engineer building Django and FastAPI services on PostgreSQL.',
+  skillGroups: [
+    { category: 'Languages', skills: ['Python', 'TypeScript', 'SQL'] },
+    { category: 'Frameworks', skills: ['Django', 'FastAPI', 'Celery'] },
+    { category: 'Data', skills: ['PostgreSQL', 'Redis'] },
+    { category: 'Platform', skills: ['Docker', 'AWS'] },
+  ],
+  experience: [
+    {
+      company: 'Acme Systems',
+      title: 'Senior Backend Engineer',
+      isCurrent: true,
+      bullets: ['Migrated a Django monolith to FastAPI services', 'Built REST APIs on PostgreSQL'],
+    },
+  ],
+});
 
 const PORT = 4000;
 
@@ -22,6 +48,7 @@ interface StoredJob extends NormalisedJob {
   isFavourite: boolean;
   relevanceScore: number | null;
   discoveredAt: string;
+  analysis: JobAnalysis;
 }
 
 let jobs: StoredJob[] = [];
@@ -79,11 +106,33 @@ async function load(): Promise<void> {
     id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
     status: ['NEW', 'SHORTLISTED', 'APPLIED', 'INTERVIEW', 'REJECTED'][index % 5] ?? 'NEW',
     isFavourite: index % 7 === 0,
-    // Stand-in scores so the Match column and its sort can be exercised. The
-    // real value comes from Phase 5's analysis.
-    relevanceScore: index % 4 === 0 ? null : 40 + ((index * 13) % 60),
+    relevanceScore: null,
     discoveredAt: new Date().toISOString(),
+    analysis: {} as JobAnalysis,
   }));
+
+  // Real heuristic analysis against the sample CV — the actual Phase 5 code
+  // path, run over real job descriptions.
+  for (const job of jobs) {
+    const analysis = analyseHeuristically({
+      cv: SAMPLE_CV,
+      jobTitle: job.title,
+      jobDescription: job.description,
+      ...(job.location ? { jobLocation: job.location } : {}),
+      remoteType: job.remoteType,
+      experienceLevel: job.experienceLevel,
+    });
+
+    job.analysis = {
+      ...analysis,
+      method: 'heuristic',
+      promptVersion: null,
+      model: null,
+      fellBackBecause: null,
+      analysedAt: new Date().toISOString(),
+    };
+    job.relevanceScore = analysis.score;
+  }
 
   console.log(`Loaded ${jobs.length} real jobs (${outcome.dedupe.duplicatesRemoved} duplicates removed).`);
 }
@@ -160,6 +209,33 @@ async function main(): Promise<void> {
           totalPages: Math.ceil(result.total / result.pageSize),
           hasNextPage: result.page * result.pageSize < result.total,
           hasPreviousPage: result.page > 1,
+        },
+      });
+      return;
+    }
+
+    if (url.pathname.startsWith('/api/jobs/') && request.method === 'GET') {
+      const id = url.pathname.split('/').pop();
+      const job = jobs.find((entry) => entry.id === id);
+      if (!job) {
+        send(404, { statusCode: 404, code: 'NOT_FOUND', message: 'No such job.', timestamp: '' });
+        return;
+      }
+      send(200, {
+        ...(toDto(job) as Record<string, unknown>),
+        description: job.description,
+        analysis: {
+          score: job.analysis.score,
+          matchingSkills: job.analysis.matchingSkills,
+          missingSkills: job.analysis.missingSkills,
+          matchingExperience: job.analysis.matchingExperience,
+          missingExperience: job.analysis.missingExperience,
+          recommendation: job.analysis.recommendation,
+          reason: job.analysis.reason,
+          method: job.analysis.method,
+          provenance: 'AI_INFERENCE',
+          promptVersion: job.analysis.promptVersion ?? 'heuristic-1',
+          analysedAt: job.analysis.analysedAt,
         },
       });
       return;

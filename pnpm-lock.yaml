@@ -356,9 +356,15 @@ importers:
         specifier: ^3.24.2
         version: 3.25.76
     devDependencies:
+      '@jobpilot/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@jobpilot/config':
         specifier: workspace:*
         version: link:../config
+      '@jobpilot/cv':
+        specifier: workspace:*
+        version: link:../cv
       eslint:
         specifier: ^9.22.0
         version: 9.39.5(jiti@2.7.0)

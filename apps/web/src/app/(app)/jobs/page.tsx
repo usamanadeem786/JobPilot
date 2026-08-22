@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as React from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { JobDetailDrawer } from '@/features/jobs/job-detail';
 import { JobsTable } from '@/features/jobs/jobs-table';
 import { toSearchParams } from '@/features/jobs/query';
 import { ApiError, apiFetch, ConfigurationError } from '@/lib/api-client';
@@ -24,6 +25,7 @@ import { ApiError, apiFetch, ConfigurationError } from '@/lib/api-client';
 export default function JobsPage(): React.ReactElement {
   const queryClient = useQueryClient();
   const [query, setQuery] = React.useState<JobListQuery>(() => JobListQuerySchema.parse({}));
+  const [detailJobId, setDetailJobId] = React.useState<string | null>(null);
 
   const jobsQuery = useQuery({
     queryKey: ['jobs', query],
@@ -58,7 +60,7 @@ export default function JobsPage(): React.ReactElement {
     () => ({
       onToggleFavourite: (job: JobListItemDto) =>
         updateJob.mutate({ id: job.id, patch: { isFavourite: !job.isFavourite } }),
-      onOpenDetail: (job: JobListItemDto) => window.open(job.jobUrl, '_blank', 'noopener'),
+      onOpenDetail: (job: JobListItemDto) => setDetailJobId(job.id),
       onGenerateCv: () => toast.info('CV tailoring arrives in Phase 6. Upload a master CV first.'),
     }),
     [updateJob],
@@ -93,6 +95,8 @@ export default function JobsPage(): React.ReactElement {
         onBulkStatus={(jobIds, status) => bulkAction.mutate({ action: 'set-status', jobIds, status })}
         onBulkGenerateCv={(jobIds) => bulkAction.mutate({ action: 'generate-cv', jobIds })}
       />
+
+      <JobDetailDrawer jobId={detailJobId} onClose={() => setDetailJobId(null)} />
     </div>
   );
 }

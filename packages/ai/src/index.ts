@@ -5,3 +5,5 @@ export * from './providers/openai-compatible';
 export * from './providers/factory';
 export * from './prompts/job-analysis';
 export * from './prompts/cv-tailoring';
+export * from './matching/heuristic';
+export * from './matching/service';

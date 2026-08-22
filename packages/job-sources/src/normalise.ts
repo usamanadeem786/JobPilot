@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { EmploymentType, ExperienceLevel, RemoteType, SalaryPeriod } from '@jobpilot/shared';
 import type { NormalisedSalary } from './types';
 
+export { htmlToText, decodeEntities } from './html';
+
 /**
  * Mapping helpers shared by every adapter.
  *
@@ -72,33 +74,6 @@ export function toSalaryPeriod(value: string | null | undefined): SalaryPeriod {
   if (text.includes('year') || text.includes('annual')) return SalaryPeriod.YEARLY;
 
   return SalaryPeriod.UNKNOWN;
-}
-
-/**
- * Strips HTML to plain text.
- *
- * Job descriptions arrive as HTML from every board. Block elements become line
- * breaks and list items become bullets, because the CV-matching step reads the
- * structure — requirements are nearly always a list.
- */
-export function htmlToText(html: string): string {
-  return html
-    .replace(/<\s*(script|style)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
-    .replace(/<\s*li[^>]*>/gi, '\n• ')
-    .replace(/<\s*br\s*\/?\s*>/gi, '\n')
-    .replace(/<\s*\/\s*(p|div|h[1-6]|ul|ol|li|tr|section)\s*>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#0?39;|&apos;/gi, "'")
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
-    .replace(/[ \t]+/g, ' ')
-    .replace(/ *\n */g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
 }
 
 /**
