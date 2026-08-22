@@ -7,3 +7,4 @@ export * from './prompts/job-analysis';
 export * from './prompts/cv-tailoring';
 export * from './matching/heuristic';
 export * from './matching/service';
+export * from './tailoring/service';
