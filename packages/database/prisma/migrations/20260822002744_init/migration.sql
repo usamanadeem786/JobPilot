@@ -5,7 +5,6 @@ CREATE EXTENSION IF NOT EXISTS "citext";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
 -- CreateExtension
-CREATE EXTENSION IF NOT EXISTS "vector";
 
 -- CreateEnum
 CREATE TYPE "Role" AS ENUM ('USER', 'ADMIN');
@@ -475,28 +474,6 @@ CREATE TABLE "outreach_drafts" (
 );
 
 -- CreateTable
-CREATE TABLE "job_embeddings" (
-    "jobId" UUID NOT NULL,
-    "model" TEXT NOT NULL,
-    "dimension" INTEGER NOT NULL,
-    "embedding" vector(1536),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "job_embeddings_pkey" PRIMARY KEY ("jobId")
-);
-
--- CreateTable
-CREATE TABLE "cv_embeddings" (
-    "masterCvId" UUID NOT NULL,
-    "model" TEXT NOT NULL,
-    "dimension" INTEGER NOT NULL,
-    "embedding" vector(1536),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "cv_embeddings_pkey" PRIMARY KEY ("masterCvId")
-);
-
--- CreateTable
 CREATE TABLE "system_settings" (
     "key" TEXT NOT NULL,
     "value" JSONB NOT NULL,
@@ -761,12 +738,6 @@ ALTER TABLE "outreach_drafts" ADD CONSTRAINT "outreach_drafts_contactId_fkey" FO
 
 -- AddForeignKey
 ALTER TABLE "outreach_drafts" ADD CONSTRAINT "outreach_drafts_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "jobs"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "job_embeddings" ADD CONSTRAINT "job_embeddings_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "jobs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "cv_embeddings" ADD CONSTRAINT "cv_embeddings_masterCvId_fkey" FOREIGN KEY ("masterCvId") REFERENCES "master_cvs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;

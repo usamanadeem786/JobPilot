@@ -10,6 +10,11 @@
     "emitDecoratorMetadata": true,
     "strictPropertyInitialization": false,
     "outDir": "dist",
+    // Keep the incremental build-info inside outDir. Left outside it, a
+    // cleaned dist (Nest's deleteOutDir) leaves stale build info behind and
+    // tsc decides everything is up to date, emitting nothing and exiting 0 —
+    // a silent no-op build.
+    "tsBuildInfoFile": "${configDir}/dist/.tsbuildinfo",
     "rootDir": "src",
     "types": ["node"]
   }

@@ -1,9 +1,0 @@
-{
-  "extends": "@jobpilot/config/tsconfig/nest.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "rootDir": ".",
-    "allowJs": false
-  },
-  "include": ["api/**/*.ts"]
-}

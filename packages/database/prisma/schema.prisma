@@ -25,7 +25,11 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [vector, pg_trgm, citext]
+  // `vector` is deliberately absent: pgvector is a Phase 5 dependency and
+  // requiring it here forces every developer and every managed Postgres to
+  // provide an extension nothing uses yet. It is added by the Phase 5
+  // migration alongside the embedding tables.
+  extensions = [pg_trgm, citext]
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +395,6 @@ model MasterCV {
   updatedAt DateTime @updatedAt
 
   tailoredCvs TailoredCV[]
-  embedding   CvEmbedding?
 
   @@index([userId, isDefault])
   @@map("master_cvs")
@@ -637,7 +640,6 @@ model Job {
   searchResults JobSearchResult[]
   applications  Application[]
   outreach      OutreachDraft[]
-  embedding     JobEmbedding?
 
   @@unique([sourceId, externalJobId])
   @@index([contentHash])
@@ -875,31 +877,11 @@ model OutreachDraft {
 }
 
 // ---------------------------------------------------------------------------
-// Vector search (pgvector). Prisma cannot select `Unsupported` columns, so
-// similarity queries run through $queryRaw in the search repository.
+// Vector search arrives in Phase 5: a `vector` extension, JobEmbedding and
+// CvEmbedding tables, and similarity queries through $queryRaw (Prisma
+// cannot select `Unsupported` columns). Kept out of the initial migration so
+// Phase 1 runs on any stock PostgreSQL.
 // ---------------------------------------------------------------------------
-
-model JobEmbedding {
-  jobId     String                       @id @db.Uuid
-  job       Job                          @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  model     String
-  dimension Int
-  embedding Unsupported("vector(1536)")?
-  createdAt DateTime                     @default(now())
-
-  @@map("job_embeddings")
-}
-
-model CvEmbedding {
-  masterCvId String                       @id @db.Uuid
-  masterCv   MasterCV                     @relation(fields: [masterCvId], references: [id], onDelete: Cascade)
-  model      String
-  dimension  Int
-  embedding  Unsupported("vector(1536)")?
-  createdAt  DateTime                     @default(now())
-
-  @@map("cv_embeddings")
-}
 
 // ---------------------------------------------------------------------------
 // Platform

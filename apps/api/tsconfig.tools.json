@@ -1,0 +1,10 @@
+{
+  "extends": "@jobpilot/config/tsconfig/nest.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "allowJs": false
+  },
+  "//": "Code outside src/ that the Nest build does not compile: the Vercel serverless handler (which imports the built dist/) and the admin CLI scripts. Checked separately so they cannot rot.",
+  "include": ["api/**/*.ts", "scripts/**/*.ts"]
+}
