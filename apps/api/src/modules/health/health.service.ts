@@ -44,11 +44,13 @@ export class HealthService {
       dependencies.database = { status: 'down', detail: 'Database is not reachable.' };
     }
 
-    // Redis is wired in Phase 3 alongside BullMQ; the URL is validated at boot
-    // so its absence here is a configuration fact, not a runtime probe.
+    // Redis is wired in Phase 3 alongside BullMQ. Nothing connects to it yet,
+    // so an absent URL is reported for visibility but must not make the
+    // instance unready — that would take a perfectly serviceable deployment
+    // out of rotation over an unused dependency.
     dependencies.redis = this.env.REDIS_URL
-      ? { status: 'up', detail: 'Configured; connection is established by the queue module.' }
-      : { status: 'down', detail: 'REDIS_URL is not set.' };
+      ? { status: 'up', detail: 'Configured; the queue module connects in Phase 3.' }
+      : { status: 'up', detail: 'Not configured. Required from Phase 3 onwards.' };
 
     const allUp = Object.values(dependencies).every((dep) => dep.status === 'up');
     return {

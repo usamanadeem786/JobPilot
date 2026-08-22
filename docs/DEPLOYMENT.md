@@ -2,27 +2,109 @@
 
 ## What has to run
 
-JobPilot is four things, not one:
-
-| Component | Needs |
-| --- | --- |
-| `apps/web` | Node runtime or any Next.js host |
-| `apps/api` | A **long-lived** Node process (persistent connections, SSE) |
-| PostgreSQL 16 | With the `vector`, `pg_trgm` and `citext` extensions |
-| Redis 7 | Queues and, later, rate-limit storage |
-
-`apps/workers` (Phase 3) is a fifth process sharing the API's image.
+| Component | Needs | Phase 1 status |
+| --- | --- | --- |
+| `apps/web` | Any Next.js host | Vercel |
+| `apps/api` | Node runtime | Vercel serverless, or a container host |
+| PostgreSQL 16 | `vector`, `pg_trgm`, `citext` extensions | Required |
+| Redis 7 | Queues and distributed rate limiting | **Not needed until Phase 3** |
+| `apps/workers` | A **long-lived** process | Phase 3 |
 
 ## Hosting options
 
-### Vercel for the frontend, a container host for the rest
+### Everything on Vercel (Phase 1)
 
-Vercel is an excellent host for `apps/web` and a poor fit for `apps/api`:
-Vercel's functions are request-scoped and stateless, while the API holds a
-Prisma connection pool, runs BullMQ workers and streams SSE for the duration of
-a job search. Those need a process that outlives a request.
+This works today, with one caveat worth understanding before you rely on it.
 
-A working split:
+Vercel runs the API as a serverless function: request-scoped, no process
+between requests. For the API as it currently stands that is fine — it is a
+stateless REST service over Postgres. The parts that genuinely need a
+long-lived process are **Phase 3 features that do not exist yet**: the BullMQ
+workers that run job searches in the background, and the SSE stream that
+reports their progress. When those land, `apps/workers` will need a host that
+runs a real process (Railway, Render, Fly). The API itself can stay on Vercel.
+
+Two other serverless consequences to plan for:
+
+- **Connection pooling.** Each warm function instance holds its own Prisma
+  pool, so many instances can exhaust Postgres connections. Use a pooled
+  connection string — Neon and Supabase both provide one (Neon's has
+  `-pooler` in the host). This matters more as traffic grows.
+- **Cold starts.** The first request after idle pays the Nest bootstrap. The
+  handler caches the app across warm invocations, so it is a per-instance cost,
+  not a per-request one.
+
+Vercel does **not** provide a database. Attach one from the Marketplace
+(Neon has a first-party integration that sets `DATABASE_URL` for you) or create
+one at neon.tech / supabase.com and paste the string in.
+
+#### Two Vercel projects, one repository
+
+| Project | Root Directory | Serves |
+| --- | --- | --- |
+| `jobpilot-web` | `apps/web` | The Next.js frontend |
+| `jobpilot-api` | `apps/api` | The NestJS API, via `apps/api/vercel.json` |
+
+Both import the same GitHub repository. `apps/api/vercel.json` routes every
+path to `api/index.ts`, which boots Nest from the compiled `dist/` — Vercel's
+esbuild does not emit the decorator metadata Nest needs, so the handler
+deliberately imports the tsc output rather than the source.
+
+#### Steps
+
+1. **Create the database.** Neon, with pgvector enabled:
+   `CREATE EXTENSION IF NOT EXISTS vector;` in its SQL editor. `pg_trgm` and
+   `citext` are created by the migration.
+2. **Run the migration from your machine** against that database — no local
+   Docker needed:
+   ```bash
+   cd "path/to/jobpilot" && DATABASE_URL="<your-neon-url>" pnpm --filter @jobpilot/database exec prisma migrate deploy
+   ```
+   Then seed the job sources and CV templates:
+   ```bash
+   cd "path/to/jobpilot" && DATABASE_URL="<your-neon-url>" pnpm --filter @jobpilot/database exec tsx prisma/seed.ts
+   ```
+3. **Deploy the API project** with Root Directory `apps/api` and the variables
+   in the table below.
+4. **Deploy the web project** with Root Directory `apps/web`, setting
+   `NEXT_PUBLIC_API_URL` to `https://<your-api-project>.vercel.app/api`.
+5. **Go back to the API project** and set `CORS_ORIGINS` to the web project's
+   exact URL, then redeploy it.
+
+#### Variables on the API project
+
+| Variable | Value |
+| --- | --- |
+| `NODE_ENV` | `production` |
+| `DATABASE_URL` | Your pooled Postgres connection string |
+| `JWT_ACCESS_SECRET` | 48 random bytes, base64 |
+| `JWT_REFRESH_SECRET` | 48 random bytes, base64 — **different** from the access secret |
+| `ENCRYPTION_KEY` | Exactly 32 random bytes, base64 |
+| `CORS_ORIGINS` | The web project's exact URL, e.g. `https://jobpilot-web.vercel.app` |
+| `COOKIE_SAMESITE` | `none` — the two projects are on different subdomains of `vercel.app`, which is a public suffix, so they count as separate sites |
+| `HTTP_USER_AGENT` | `JobPilot/0.1 (+https://your-site; you@example.com)` |
+
+Do not set `API_PORT` or `PORT`; Vercel owns the socket. `REDIS_URL` is
+optional until Phase 3. Everything else in `.env.example` disables its own
+feature when absent, and the API reports "not configured" rather than failing.
+
+Generate the three secrets with:
+
+```bash
+node -e "const c=require('crypto');console.log('JWT_ACCESS_SECRET='+c.randomBytes(48).toString('base64'));console.log('JWT_REFRESH_SECRET='+c.randomBytes(48).toString('base64'));console.log('ENCRYPTION_KEY='+c.randomBytes(32).toString('base64'))"
+```
+
+#### Only on the web project
+
+`NEXT_PUBLIC_API_URL`. That is the single variable the frontend reads, and it
+is inlined at build time, so changing it needs a redeploy rather than a
+restart. Never put a secret in the web project: `NEXT_PUBLIC_*` values ship to
+every visitor's browser in plain text.
+
+### Vercel for the frontend, a container host for the API
+
+Preferable once Phase 3 lands, because the workers need a real process anyway
+and can then share the API's image.
 
 - **`apps/web` → Vercel, imported from GitHub.** Push the repository, then
   *Add New → Project* in the Vercel dashboard, import it, and set **Root

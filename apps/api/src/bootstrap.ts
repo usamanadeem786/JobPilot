@@ -11,7 +11,16 @@ import { ENV, type Env } from './config/config.module';
  * header or CORS rule can never be enabled in production but missing under
  * test (or the reverse).
  */
-export function configureApp(app: INestApplication): Env {
+export interface ConfigureOptions {
+  /**
+   * Shutdown hooks attach process-level listeners for SIGTERM/SIGINT. That is
+   * right for a long-lived server and wrong for a serverless function, where
+   * the same process handles many invocations and would accumulate listeners.
+   */
+  readonly shutdownHooks?: boolean;
+}
+
+export function configureApp(app: INestApplication, options: ConfigureOptions = {}): Env {
   const env = app.get<Env>(ENV);
   const expressApp = app as NestExpressApplication;
 
@@ -52,7 +61,9 @@ export function configureApp(app: INestApplication): Env {
     maxAge: 600,
   });
 
-  app.enableShutdownHooks();
+  if (options.shutdownHooks ?? true) {
+    app.enableShutdownHooks();
+  }
 
   return env;
 }

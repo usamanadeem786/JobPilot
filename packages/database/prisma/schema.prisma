@@ -16,6 +16,10 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
+  // "native" covers local development; the RHEL target is the query engine
+  // Vercel's serverless runtime (Amazon Linux, OpenSSL 3) needs. Without it
+  // the function starts and then fails on the first query.
+  binaryTargets   = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {

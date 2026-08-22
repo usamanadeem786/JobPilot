@@ -98,7 +98,16 @@ export const EnvSchema = z
     COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
 
     DATABASE_URL: z.string().url('DATABASE_URL must be a valid connection string.'),
-    REDIS_URL: z.string().url('REDIS_URL must be a valid connection string.'),
+    /**
+     * Optional until Phase 3. Nothing connects to Redis yet — it is the queue
+     * and distributed-rate-limit backend for background jobs. Requiring it now
+     * would block a serverless deployment that has no use for it.
+     */
+    REDIS_URL: z
+      .string()
+      .url('REDIS_URL must be a valid connection string.')
+      .optional()
+      .or(z.literal('').transform(() => undefined)),
 
     JWT_ACCESS_SECRET: strongSecret('JWT_ACCESS_SECRET'),
     JWT_REFRESH_SECRET: strongSecret('JWT_REFRESH_SECRET'),
