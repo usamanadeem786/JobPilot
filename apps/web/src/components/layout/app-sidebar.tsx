@@ -2,6 +2,7 @@
 
 import {
   Briefcase,
+  Clock,
   FileText,
   LayoutDashboard,
   Search,
@@ -28,6 +29,7 @@ interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, available: true },
   { href: '/jobs', label: 'Jobs', icon: Briefcase, available: true },
+  { href: '/latest', label: 'Latest', icon: Clock, available: true },
   { href: '/searches', label: 'Searches', icon: Search, available: false },
   { href: '/cvs', label: 'CVs', icon: FileText, available: false },
   { href: '/applications', label: 'Applications', icon: Send, available: false },
