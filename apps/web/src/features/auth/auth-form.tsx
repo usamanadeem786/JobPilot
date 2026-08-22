@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PASSWORD_MIN_LENGTH } from '@jobpilot/shared';
-import { ApiError, NetworkError } from '@/lib/api-client';
+import { ApiError, ConfigurationError, NetworkError } from '@/lib/api-client';
 import { useAuth } from './auth-provider';
 
 /**
@@ -27,13 +27,36 @@ function applyApiError<TValues extends FieldValues>(
   form: UseFormReturn<TValues>,
   setFormError: (message: string) => void,
 ): void {
+  // A deployment that cannot reach its API at all. Kept separate from a
+  // network failure because "check your connection" sends the user chasing
+  // their own wifi over a server-side misconfiguration.
+  if (error instanceof ConfigurationError) {
+    setFormError(error.message);
+    return;
+  }
+
   if (error instanceof ApiError) {
+    // 400: the server rejected specific fields — show them on those fields.
     let attachedToField = false;
     for (const [path, message] of Object.entries(error.fieldErrorMap())) {
       form.setError(path as Path<TValues>, { type: 'server', message });
       attachedToField = true;
     }
-    if (!attachedToField) setFormError(error.message);
+    if (attachedToField) return;
+
+    // 409 duplicate email is about a field even though the server reports it
+    // at the top level, so it reads better attached to the input.
+    if (error.code === 'EMAIL_ALREADY_REGISTERED' && 'email' in form.getValues()) {
+      form.setError('email' as Path<TValues>, { type: 'server', message: error.message });
+      return;
+    }
+
+    // 5xx: include the request id so a report can be traced to a log line.
+    setFormError(
+      error.status >= 500 && error.requestId
+        ? `${error.message} (reference ${error.requestId})`
+        : error.message,
+    );
     return;
   }
 

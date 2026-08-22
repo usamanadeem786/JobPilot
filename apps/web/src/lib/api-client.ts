@@ -1,6 +1,39 @@
 import { ERROR_MESSAGES, type ApiErrorBody, type ApiFieldError, type ErrorCode } from '@jobpilot/shared';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
+/**
+ * Base URL for API calls.
+ *
+ * Defaults to the same-origin path `/api`, which `next.config.ts` forwards to
+ * the real backend. A localhost default used to live here, and it is exactly
+ * the wrong failure mode in production: the bundle ships with
+ * `http://localhost:4000` inlined, every visitor's browser posts to its own
+ * machine, and the only symptom is a generic "could not reach the server".
+ *
+ * Set `NEXT_PUBLIC_API_URL` only to bypass the proxy and call a backend
+ * directly — which then requires CORS and a cross-site cookie policy.
+ */
+const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? '/api').replace(/\/+$/, '');
+
+const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/i;
+
+/**
+ * True when the client is configured to call a loopback address from a page
+ * that is not itself on loopback — a production build that never received its
+ * API URL. Reported as the configuration error it is, rather than as a
+ * mysterious network failure that sends the user to check their wifi.
+ *
+ * Pure, so the interesting combinations are testable without a fake DOM.
+ */
+export function isLoopbackMismatch(apiUrl: string, pageHostname: string): boolean {
+  const match = /^https?:\/\/([^/:]+|\[[^\]]+\])/i.exec(apiUrl);
+  if (!match?.[1]) return false;
+  return LOOPBACK_HOST.test(match[1]) && !LOOPBACK_HOST.test(pageHostname);
+}
+
+function isUnreachableLoopbackTarget(): boolean {
+  if (typeof window === 'undefined') return false;
+  return isLoopbackMismatch(API_URL, window.location.hostname);
+}
 
 /**
  * The access token is held in a module variable rather than localStorage.
@@ -42,11 +75,24 @@ export class ApiError extends Error {
   }
 }
 
+/** The request never reached a server: offline, DNS failure, TLS error. */
 export class NetworkError extends Error {
   constructor(cause: unknown) {
     super('Could not reach the server. Check your connection and try again.');
     this.name = 'NetworkError';
     this.cause = cause;
+  }
+}
+
+/**
+ * The app is pointing somewhere it can never reach. Distinct from
+ * NetworkError because no amount of retrying or reconnecting will fix it —
+ * a deployment setting has to change.
+ */
+export class ConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigurationError';
   }
 }
 
@@ -95,6 +141,14 @@ async function refreshSession(): Promise<boolean> {
   return refreshInFlight;
 }
 
+/**
+ * A 404 from the API is JSON; a 404 from the Next router is an HTML page.
+ * The content type is what separates "no such user" from "no such backend".
+ */
+function isNextRouterHtml(response: Response): boolean {
+  return (response.headers.get('content-type') ?? '').includes('text/html');
+}
+
 async function toApiError(response: Response): Promise<ApiError> {
   let body: ApiErrorBody;
   try {
@@ -137,11 +191,28 @@ export async function apiFetch<TResponse>(
     });
   };
 
+  if (isUnreachableLoopbackTarget()) {
+    throw new ConfigurationError(
+      'This deployment is not connected to an API. It is configured to call ' +
+        `${API_URL}, which is only reachable from the machine running it.`,
+    );
+  }
+
   let response: Response;
   try {
     response = await send();
   } catch (error) {
     throw new NetworkError(error);
+  }
+
+  // A proxied /api path that reaches the Next router instead of the backend
+  // means no rewrite is configured. Returning "not found" here would send the
+  // user hunting for a missing account rather than a missing deployment.
+  if (response.status === 404 && API_URL.startsWith('/') && isNextRouterHtml(response)) {
+    throw new ConfigurationError(
+      'The API proxy is not configured for this deployment, so API requests are ' +
+        'not reaching a backend. Set API_PROXY_TARGET and redeploy.',
+    );
   }
 
   // One retry, and only for an expired token: a 401 for any other reason

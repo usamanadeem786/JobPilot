@@ -5,11 +5,13 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      "env": ["NEXT_PUBLIC_API_URL", "API_PROXY_TARGET", "NEXT_OUTPUT_STANDALONE"]
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "env": ["NEXT_PUBLIC_API_URL", "API_PROXY_TARGET"]
     },
     "lint": {
       "dependsOn": ["^build"]
@@ -19,7 +21,8 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "outputs": ["coverage/**"],
+      "env": ["DATABASE_URL", "TEST_DATABASE_URL"]
     },
     "test:watch": {
       "cache": false,

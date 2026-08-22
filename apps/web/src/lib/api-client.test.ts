@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiFetch, ApiError, getAccessToken, NetworkError, setAccessToken } from './api-client';
+import {
+  apiFetch,
+  ApiError,
+  getAccessToken,
+  isLoopbackMismatch,
+  NetworkError,
+  setAccessToken,
+} from './api-client';
+// The configuration suite re-imports the module with a different environment,
+// so it needs the module's type without a value import.
+import type * as ApiClient from './api-client';
 
 const API_URL = 'http://localhost:4000/api';
 
@@ -184,6 +194,108 @@ describe('apiFetch', () => {
     await expect(apiFetch('/users/me')).rejects.toMatchObject({
       status: 502,
       code: 'INTERNAL_ERROR',
+    });
+  });
+});
+
+describe('isLoopbackMismatch', () => {
+  it('flags a production page configured to call localhost', () => {
+    // The exact failure that shipped: NEXT_PUBLIC_API_URL was never set, the
+    // localhost default was inlined into the bundle, and every visitor's
+    // browser posted to its own machine.
+    expect(isLoopbackMismatch('http://localhost:4000/api', 'job-pilot-web.vercel.app')).toBe(true);
+    expect(isLoopbackMismatch('http://127.0.0.1:4000/api', 'example.com')).toBe(true);
+  });
+
+  it('allows localhost when the page is itself on localhost', () => {
+    expect(isLoopbackMismatch('http://localhost:4000/api', 'localhost')).toBe(false);
+    expect(isLoopbackMismatch('http://127.0.0.1:4000/api', '127.0.0.1')).toBe(false);
+  });
+
+  it('ignores a same-origin relative base, which is the default', () => {
+    expect(isLoopbackMismatch('/api', 'job-pilot-web.vercel.app')).toBe(false);
+  });
+
+  it('allows a real remote API from a production page', () => {
+    expect(isLoopbackMismatch('https://api.example.com/api', 'app.example.com')).toBe(false);
+  });
+});
+
+describe('configuration failures', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  /**
+   * Re-imports the client with NEXT_PUBLIC_API_URL unset, which is the
+   * production default: the base URL becomes the same-origin `/api` path that
+   * next.config.ts forwards. The module reads the variable once at load, so a
+   * fresh module registry is the only way to exercise it.
+   */
+  async function importWithSameOriginDefault(): Promise<typeof ApiClient> {
+    const previous = process.env.NEXT_PUBLIC_API_URL;
+    delete process.env.NEXT_PUBLIC_API_URL;
+    vi.resetModules();
+    try {
+      return await import('./api-client');
+    } finally {
+      if (previous !== undefined) process.env.NEXT_PUBLIC_API_URL = previous;
+    }
+  }
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it('defaults to the same-origin /api path so nothing is baked into the bundle', async () => {
+    const client = await importWithSameOriginDefault();
+    fetchMock.mockResolvedValueOnce(
+      new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+
+    await client.apiFetch('/users/me');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/users/me');
+  });
+
+  it('reports a missing proxy rather than a 404, when the Next router answers', async () => {
+    // With the same-origin default, an unconfigured rewrite means /api/* falls
+    // through to the Next router, which returns an HTML 404. Surfacing that as
+    // "not found" would send the user looking for a missing account.
+    const client = await importWithSameOriginDefault();
+    fetchMock.mockResolvedValueOnce(
+      new Response('<!DOCTYPE html><html></html>', {
+        status: 404,
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      }),
+    );
+
+    await expect(
+      client.apiFetch('/auth/register', { method: 'POST', body: {} }),
+    ).rejects.toBeInstanceOf(client.ConfigurationError);
+  });
+
+  it('still treats a JSON 404 from the API as a normal not-found', async () => {
+    const client = await importWithSameOriginDefault();
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          statusCode: 404,
+          code: 'NOT_FOUND',
+          message: 'No such job.',
+          timestamp: new Date().toISOString(),
+        }),
+        { status: 404, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    await expect(client.apiFetch('/jobs/missing')).rejects.toMatchObject({
+      name: 'ApiError',
+      code: 'NOT_FOUND',
     });
   });
 });
