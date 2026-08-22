@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "next build",
+    "build": "pnpm --filter @jobpilot/shared build && next build",
     "dev": "next dev --port 3000",
     "start": "next start --port 3000",
     "typecheck": "tsc -p tsconfig.json --noEmit",

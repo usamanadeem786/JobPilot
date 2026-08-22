@@ -24,11 +24,18 @@ a job search. Those need a process that outlives a request.
 
 A working split:
 
-- **`apps/web` → Vercel.** Push the repository to GitHub, then *Add New →
-  Project* in the Vercel dashboard and import it. The root `vercel.json`
-  already sets the framework, install command and build command (it builds
-  `@jobpilot/shared` first, which the web app imports). The one thing the file
-  cannot set is **Root Directory** — choose `apps/web` in the import dialog.
+- **`apps/web` → Vercel, imported from GitHub.** Push the repository, then
+  *Add New → Project* in the Vercel dashboard, import it, and set **Root
+  Directory** to `apps/web`. Leave everything else on its default: Vercel
+  detects Next.js and pnpm, installs the whole workspace from the repository
+  root, and runs `apps/web`'s own `build` script — which builds
+  `@jobpilot/shared` first, because the web app imports it.
+
+  Do not try to deploy this with `vercel deploy` from a bare file upload. A
+  file-upload deployment with a root directory set only carries that subtree,
+  so the sibling workspace packages vanish and pnpm fails with
+  `No matching version found for @jobpilot/config@* inside the workspace`.
+  Monorepo support lives in the git integration.
 
   Set `NEXT_PUBLIC_API_URL` to the deployed API's URL under *Settings →
   Environment Variables* **before the first build**: `NEXT_PUBLIC_*` values are
