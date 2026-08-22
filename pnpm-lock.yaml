@@ -239,6 +239,34 @@ importers:
         specifier: ^3.0.8
         version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.32.0)(terser@5.50.0)(tsx@4.23.12)
 
+  packages/ai:
+    dependencies:
+      '@jobpilot/cv':
+        specifier: workspace:*
+        version: link:../cv
+      '@jobpilot/shared':
+        specifier: workspace:*
+        version: link:../shared
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
+    devDependencies:
+      '@jobpilot/config':
+        specifier: workspace:*
+        version: link:../config
+      eslint:
+        specifier: ^9.22.0
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: ^5.8.2
+        version: 5.9.3
+      typescript-eslint:
+        specifier: ^8.26.1
+        version: 8.67.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
+      vitest:
+        specifier: ^3.0.8
+        version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.32.0)(terser@5.50.0)(tsx@4.23.12)
+
   packages/config:
     devDependencies:
       '@eslint/js':
