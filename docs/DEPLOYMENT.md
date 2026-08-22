@@ -96,10 +96,20 @@ node -e "const c=require('crypto');console.log('JWT_ACCESS_SECRET='+c.randomByte
 
 #### Only on the web project
 
-`NEXT_PUBLIC_API_URL`. That is the single variable the frontend reads, and it
-is inlined at build time, so changing it needs a redeploy rather than a
-restart. Never put a secret in the web project: `NEXT_PUBLIC_*` values ship to
-every visitor's browser in plain text.
+`API_PROXY_TARGET`, set to the API project's origin (no trailing path), e.g.
+`https://jobpilot-api.vercel.app`.
+
+**It must be present at build time.** Next compiles rewrites into
+`routes-manifest.json` during `next build`, so a value supplied only at runtime
+produces a build with no rewrite, and every `/api` call falls through to the
+Next router and returns 404. On Vercel that means adding the variable *before*
+the deploy, and redeploying after any change — the same rule as a
+`NEXT_PUBLIC_*` value, despite this one never reaching the browser.
+
+`NEXT_PUBLIC_API_URL` is only needed if you deliberately bypass the proxy and
+point the browser straight at the API, which then requires `CORS_ORIGINS` and
+`COOKIE_SAMESITE=none`. Never put a secret in the web project: `NEXT_PUBLIC_*`
+values ship to every visitor's browser in plain text.
 
 ### Vercel for the frontend, a container host for the API
 

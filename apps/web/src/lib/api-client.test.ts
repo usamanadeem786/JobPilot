@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   apiFetch,
   ApiError,
+  ConfigurationError,
   getAccessToken,
   isLoopbackMismatch,
   NetworkError,
@@ -188,11 +189,14 @@ describe('apiFetch', () => {
     expect(refreshCalls).toBe(1);
   });
 
-  it('falls back to a generic error when the body is not valid JSON', async () => {
-    fetchMock.mockResolvedValueOnce(new Response('<html>502</html>', { status: 502 }));
+  it('falls back to a generic error when a 4xx body is not valid JSON', async () => {
+    // A malformed 4xx is still a client error the API rejected, so it keeps
+    // its status. Only a non-JSON 5xx means the request never arrived — that
+    // case is covered separately.
+    fetchMock.mockResolvedValueOnce(new Response('<html>418</html>', { status: 418 }));
 
     await expect(apiFetch('/users/me')).rejects.toMatchObject({
-      status: 502,
+      status: 418,
       code: 'INTERNAL_ERROR',
     });
   });
@@ -297,5 +301,64 @@ describe('configuration failures', () => {
       name: 'ApiError',
       code: 'NOT_FOUND',
     });
+  });
+});
+
+describe('an unreachable backend behind the proxy', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    setAccessToken(null);
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('reports a configuration problem, not a server fault', async () => {
+    // Found during a QA pass with the backend stopped: Next answers a failed
+    // rewrite with a plain-text 500, which the client rendered as "something
+    // went wrong on our side". Nothing is wrong on the server side — the
+    // request never arrived, and waiting will not fix it.
+    fetchMock.mockResolvedValueOnce(
+      new Response('Internal Server Error', {
+        status: 500,
+        headers: { 'Content-Type': 'text/plain' },
+      }),
+    );
+
+    await expect(apiFetch('/auth/register', { method: 'POST', body: {} })).rejects.toBeInstanceOf(
+      ConfigurationError,
+    );
+  });
+
+  it('still treats a JSON 500 from the API as a real server error', async () => {
+    // A genuine API fault does reply with JSON, and must keep its request id
+    // so it can be traced in the logs.
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          statusCode: 500,
+          code: 'INTERNAL_ERROR',
+          message: 'Something went wrong on our side.',
+          requestId: 'req-123',
+          timestamp: new Date().toISOString(),
+        }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    await expect(apiFetch('/users/me')).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 500,
+      requestId: 'req-123',
+    });
+  });
+
+  it('treats a 502 from a gateway as unreachable too', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('Bad Gateway', { status: 502 }));
+    await expect(apiFetch('/users/me')).rejects.toBeInstanceOf(ConfigurationError);
   });
 });

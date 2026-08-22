@@ -12,8 +12,14 @@ import type { NextConfig } from 'next';
  *    domain, so `SameSite=Lax` keeps working. Pointing the browser straight at
  *    another domain makes the refresh cookie cross-site and forces the weaker
  *    `SameSite=None`.
- *  - No rebuild to repoint it. `NEXT_PUBLIC_*` values are inlined into the
- *    client bundle at build time and cannot be changed by editing an env var.
+ *  - It is not shipped to the browser, so the backend's address is not part
+ *    of the public bundle.
+ *
+ * IMPORTANT: this is still a BUILD-TIME value. Next compiles rewrites into
+ * routes-manifest.json during `next build`, so changing API_PROXY_TARGET
+ * requires a redeploy, exactly like a NEXT_PUBLIC_* variable. Setting it only
+ * in the runtime environment produces a build with no rewrite at all, and
+ * every /api call then falls through to the Next router and 404s.
  */
 const apiProxyTarget = process.env.API_PROXY_TARGET?.trim().replace(/\/+$/, '');
 

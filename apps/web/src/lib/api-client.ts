@@ -149,6 +149,22 @@ function isNextRouterHtml(response: Response): boolean {
   return (response.headers.get('content-type') ?? '').includes('text/html');
 }
 
+/**
+ * True when the proxy could not reach the backend at all.
+ *
+ * Next answers a failed rewrite with a plain-text 500 ("Internal Server
+ * Error"), which is indistinguishable from a real API fault unless the body
+ * is inspected. The API always replies with JSON, so a 5xx that is not JSON
+ * means the request never arrived — a different problem with a different fix,
+ * and telling the user "something went wrong on our side" sends them to wait
+ * for a server that is not coming back on its own.
+ */
+function isProxyFailure(response: Response): boolean {
+  if (response.status < 500) return false;
+  const contentType = response.headers.get('content-type') ?? '';
+  return !contentType.includes('application/json');
+}
+
 async function toApiError(response: Response): Promise<ApiError> {
   let body: ApiErrorBody;
   try {
@@ -212,6 +228,13 @@ export async function apiFetch<TResponse>(
     throw new ConfigurationError(
       'The API proxy is not configured for this deployment, so API requests are ' +
         'not reaching a backend. Set API_PROXY_TARGET and redeploy.',
+    );
+  }
+
+  if (isProxyFailure(response)) {
+    throw new ConfigurationError(
+      'The API could not be reached. The server is configured to forward requests ' +
+        'to a backend that is not responding.',
     );
   }
 
