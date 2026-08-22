@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateEnv } from './env.schema';
+import { resolvePort, validateEnv } from './env.schema';
 
 const VALID: Record<string, string> = {
   DATABASE_URL: 'postgresql://user:pass@localhost:5432/db?schema=public',
@@ -78,6 +78,10 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ ...VALID, STORAGE_DRIVER: 's3' })).toThrow(/S3_BUCKET/);
   });
 
+  it('leaves PORT unset when the platform does not assign one', () => {
+    expect(validateEnv({ ...VALID }).PORT).toBeUndefined();
+  });
+
   it('lists every problem at once rather than failing on the first', () => {
     let message = '';
     try {
@@ -88,5 +92,20 @@ describe('validateEnv', () => {
 
     expect(message).toContain('JWT_ACCESS_SECRET');
     expect(message).toContain('REDIS_URL');
+  });
+});
+
+describe('resolvePort', () => {
+  it('uses API_PORT when the platform assigns no PORT', () => {
+    expect(resolvePort(validateEnv({ ...VALID, API_PORT: '4000' }))).toBe(4000);
+  });
+
+  it('prefers a platform-assigned PORT over API_PORT', () => {
+    // Railway, Render and Fly all inject PORT and route only to that port.
+    expect(resolvePort(validateEnv({ ...VALID, API_PORT: '4000', PORT: '8080' }))).toBe(8080);
+  });
+
+  it('ignores an empty PORT rather than coercing it to 0', () => {
+    expect(resolvePort(validateEnv({ ...VALID, PORT: '' }))).toBe(4000);
   });
 });

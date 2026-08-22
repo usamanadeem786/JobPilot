@@ -69,6 +69,13 @@ export const EnvSchema = z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
 
+    /**
+     * Container platforms (Railway, Render, Fly, Heroku) assign a port and
+     * route to it via PORT. It wins over API_PORT, which is the local default:
+     * listening on the wrong port makes every health check fail while the
+     * process looks perfectly healthy in the logs.
+     */
+    PORT: optionalPort,
     API_PORT: z.coerce.number().int().min(1).max(65535).default(4000),
     API_GLOBAL_PREFIX: z.string().default('api'),
     CORS_ORIGINS: commaSeparated,
@@ -77,6 +84,18 @@ export const EnvSchema = z
      * the API already enforces limits — never to make a load test pass.
      */
     THROTTLE_ENABLED: booleanFromString.default(true),
+    /**
+     * SameSite policy for the refresh cookie.
+     *
+     * `lax` is correct and is its own CSRF defence, but a Lax cookie is only
+     * sent when the API shares a registrable domain with the site (e.g.
+     * app.example.com calling api.example.com). Split across unrelated hosts
+     * — a Vercel frontend calling a Railway API — the browser drops it and
+     * sessions silently fail to survive a reload. `none` fixes that at the
+     * cost of the CSRF protection SameSite provides, so it additionally
+     * requires HTTPS and a strict CORS allowlist.
+     */
+    COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
 
     DATABASE_URL: z.string().url('DATABASE_URL must be a valid connection string.'),
     REDIS_URL: z.string().url('REDIS_URL must be a valid connection string.'),
@@ -148,6 +167,17 @@ export const EnvSchema = z
       });
     }
 
+    // SameSite=None is ignored by browsers unless the cookie is also Secure,
+    // which only happens in production. Allowing it in a dev build would look
+    // configured while silently not working.
+    if (env.COOKIE_SAMESITE === 'none' && env.NODE_ENV !== 'production') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['COOKIE_SAMESITE'],
+        message: 'COOKIE_SAMESITE="none" requires NODE_ENV=production, because it needs Secure.',
+      });
+    }
+
     if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -182,6 +212,11 @@ export const EnvSchema = z
   });
 
 export type Env = z.infer<typeof EnvSchema>;
+
+/** The port to bind, honouring a platform-assigned PORT over API_PORT. */
+export function resolvePort(env: Env): number {
+  return env.PORT ?? env.API_PORT;
+}
 
 /** Formats Zod issues into an operator-readable startup error. */
 export function validateEnv(raw: Record<string, unknown>): Env {

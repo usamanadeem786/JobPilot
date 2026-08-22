@@ -8,17 +8,28 @@ export const REFRESH_COOKIE_NAME = 'jp_refresh';
  * including anything injected by an XSS — cannot read it. The access token,
  * which is short-lived, is held in memory by the client instead.
  *
- * `sameSite: 'lax'` is what protects the refresh endpoint from CSRF: browsers
- * do not attach a Lax cookie to a cross-site POST, and refresh is POST-only.
+ * `sameSite` defaults to 'lax', which is what protects the refresh endpoint
+ * from CSRF: browsers do not attach a Lax cookie to a cross-site POST, and
+ * refresh is POST-only. Deployments that split the frontend and API across
+ * unrelated domains must set COOKIE_SAMESITE=none, which forces Secure and
+ * leans entirely on the CORS allowlist instead.
+ *
  * `path` narrows the cookie so it is not sent with every API call.
  */
 export function refreshCookieOptions(env: Env, expiresAt: Date): CookieOptions {
   return {
-    httpOnly: true,
-    secure: env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: `/${env.API_GLOBAL_PREFIX}/auth`,
+    ...baseCookieOptions(env),
     expires: expiresAt,
+  };
+}
+
+function baseCookieOptions(env: Env): CookieOptions {
+  return {
+    httpOnly: true,
+    // SameSite=None is meaningless without Secure, so it implies it.
+    secure: env.NODE_ENV === 'production' || env.COOKIE_SAMESITE === 'none',
+    sameSite: env.COOKIE_SAMESITE,
+    path: `/${env.API_GLOBAL_PREFIX}/auth`,
   };
 }
 
@@ -32,12 +43,9 @@ export function setRefreshCookie(
 }
 
 export function clearRefreshCookie(response: Response, env: Env): void {
-  response.clearCookie(REFRESH_COOKIE_NAME, {
-    httpOnly: true,
-    secure: env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: `/${env.API_GLOBAL_PREFIX}/auth`,
-  });
+  // The attributes must match the ones the cookie was set with, or the browser
+  // keeps the original and "sign out" leaves a live session behind.
+  response.clearCookie(REFRESH_COOKIE_NAME, baseCookieOptions(env));
 }
 
 /**
