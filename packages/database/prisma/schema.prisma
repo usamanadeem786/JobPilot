@@ -1,0 +1,932 @@
+// ===========================================================================
+// JobPilot — Prisma schema
+//
+// Design notes that matter when reading this file:
+//
+//  * `Job` is a GLOBAL, canonical record of a public job posting. It is
+//    deduplicated across users, searches and sources. Anything that differs
+//    per user (status, relevance score, notes) lives on `UserJob`, and the
+//    API flattens the two into a single object for the client.
+//  * Every field that could be an AI guess carries a `provenance` marker so
+//    the product can never present an inference as a verified fact.
+//  * Contact data is limited to publicly published professional contact
+//    details, with the source and confidence recorded alongside every row.
+// ===========================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector, pg_trgm, citext]
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum RemoteType {
+  REMOTE
+  HYBRID
+  ONSITE
+  UNKNOWN
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  TEMPORARY
+  INTERNSHIP
+  FREELANCE
+  UNKNOWN
+}
+
+enum ExperienceLevel {
+  INTERNSHIP
+  ENTRY
+  JUNIOR
+  MID
+  SENIOR
+  LEAD
+  PRINCIPAL
+  EXECUTIVE
+  UNKNOWN
+}
+
+enum SalaryPeriod {
+  HOURLY
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+  UNKNOWN
+}
+
+/// Per-user pipeline state for a job.
+enum JobStatus {
+  NEW
+  SHORTLISTED
+  CV_GENERATED
+  APPLIED
+  INTERVIEW
+  REJECTED
+  OFFER
+  ARCHIVED
+}
+
+enum ApplicationStatus {
+  DRAFT
+  READY
+  SUBMITTED
+  ACKNOWLEDGED
+  INTERVIEW
+  REJECTED
+  OFFER
+  WITHDRAWN
+}
+
+/// How an application reached the employer. AUTOMATED is only ever used by an
+/// adapter for a platform that explicitly permits programmatic submission.
+enum ApplicationMethod {
+  MANUAL
+  ASSISTED
+  AUTOMATED
+}
+
+enum ApplicationEventType {
+  CREATED
+  STATUS_CHANGED
+  CV_ATTACHED
+  COVER_LETTER_ATTACHED
+  SUBMITTED
+  NOTE_ADDED
+  INTERVIEW_SCHEDULED
+  EXTERNAL_UPDATE
+  ERROR
+}
+
+/// The kind of integration behind a job source. Determines what the platform
+/// legally allows us to do, not just how we talk to it.
+enum JobSourceKind {
+  /// Public applicant-tracking-system board JSON (Greenhouse, Lever, Ashby).
+  ATS_BOARD
+  /// Official aggregator API with a documented free/commercial tier.
+  AGGREGATOR_API
+  /// Requires a signed partner agreement before it can be enabled.
+  PARTNER_API
+  /// A career page that publishes a machine-readable feed we may read.
+  CAREER_FEED
+  /// Manually imported by the user (paste a URL / job description).
+  MANUAL_IMPORT
+}
+
+enum JobSourceHealth {
+  UNKNOWN
+  HEALTHY
+  DEGRADED
+  UNAVAILABLE
+  NOT_CONFIGURED
+}
+
+/// How a job can be applied to, decided by the source adapter.
+enum ApplyMethod {
+  /// Open the employer's official application page in a new tab.
+  EXTERNAL_URL
+  /// The platform offers a permitted programmatic application API.
+  PERMITTED_API
+  /// The user must apply manually; we only supply the details.
+  MANUAL_ONLY
+}
+
+enum SearchStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+/// Truth level of a stored value. Nothing derived by an LLM may ever be
+/// stored as VERIFIED.
+enum Provenance {
+  /// Supplied directly by the source or the user.
+  KNOWN
+  /// Independently confirmed against a second permitted source.
+  VERIFIED
+  /// Produced by an LLM or heuristic. Always displayed as an inference.
+  AI_INFERENCE
+  /// Looked for, not found. Recorded so the UI can say so explicitly.
+  NOT_FOUND
+}
+
+enum ContactRole {
+  RECRUITER
+  TALENT_ACQUISITION
+  HR
+  HIRING_MANAGER
+  ENGINEERING_MANAGER
+  CTO
+  CEO
+  FOUNDER
+  OTHER
+}
+
+enum OutreachChannel {
+  EMAIL
+  LINKEDIN_MESSAGE
+  CONTACT_FORM
+  OTHER
+}
+
+enum OutreachStatus {
+  DRAFT
+  APPROVED
+  SENT
+  RESPONDED
+  BOUNCED
+  FOLLOW_UP_DUE
+  CLOSED
+}
+
+enum TailoredCvStatus {
+  GENERATING
+  DRAFT
+  EDITED
+  FINAL
+  FAILED
+}
+
+enum StorageDriver {
+  LOCAL
+  S3
+}
+
+enum ScanStatus {
+  PENDING
+  CLEAN
+  INFECTED
+  SKIPPED
+  ERROR
+}
+
+enum MatchRecommendation {
+  STRONG_MATCH
+  GOOD_MATCH
+  POSSIBLE_MATCH
+  WEAK_MATCH
+  NOT_RECOMMENDED
+}
+
+// ---------------------------------------------------------------------------
+// Identity & access
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String     @id @default(uuid()) @db.Uuid
+  email         String     @unique @db.Citext
+  passwordHash  String?
+  role          Role       @default(USER)
+  status        UserStatus @default(ACTIVE)
+  emailVerified Boolean    @default(false)
+  lastLoginAt   DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  profile        UserProfile?
+  oauthAccounts  OAuthAccount[]
+  refreshTokens  RefreshToken[]
+  files          FileObject[]
+  masterCvs      MasterCV[]
+  tailoredCvs    TailoredCV[]
+  jobs           UserJob[]
+  jobAnalyses    JobAnalysis[]
+  searches       JobSearch[]
+  savedSearches  SavedSearch[]
+  applications   Application[]
+  outreachDrafts OutreachDraft[]
+  auditLogs      AuditLog[]
+
+  @@index([status])
+  @@map("users")
+}
+
+model UserProfile {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @unique @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  fullName String
+  headline String?
+  /// Encrypted at rest (AES-256-GCM) — see packages/shared/src/crypto.
+  phone    String?
+
+  locationCity    String?
+  locationCountry String?
+  timezone        String?
+
+  yearsExperience  Int?
+  desiredRoles     String[]   @default([])
+  desiredLocations String[]   @default([])
+  remotePreference RemoteType @default(UNKNOWN)
+  minSalary        Int?
+  salaryCurrency   String?    @db.VarChar(3)
+  skills           String[]   @default([])
+
+  linkedinUrl  String?
+  githubUrl    String?
+  portfolioUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_profiles")
+}
+
+model OAuthAccount {
+  id                String  @id @default(uuid()) @db.Uuid
+  userId            String  @db.Uuid
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String
+  providerAccountId String
+  email             String? @db.Citext
+
+  createdAt DateTime @default(now())
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("oauth_accounts")
+}
+
+/// Rotating refresh tokens. Only the SHA-256 hash is stored; reuse of a
+/// revoked token invalidates the whole family (theft detection).
+model RefreshToken {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String    @unique
+  familyId     String    @db.Uuid
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?   @db.Uuid
+  userAgent    String?
+  ipAddress    String?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, revokedAt])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Files
+// ---------------------------------------------------------------------------
+
+model FileObject {
+  id             String        @id @default(uuid()) @db.Uuid
+  userId         String        @db.Uuid
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  driver         StorageDriver @default(LOCAL)
+  storageKey     String        @unique
+  originalName   String
+  mimeType       String
+  sizeBytes      Int
+  checksumSha256 String
+  scanStatus     ScanStatus    @default(PENDING)
+  scanDetail     String?
+  createdAt      DateTime      @default(now())
+
+  masterCvSource MasterCV[]   @relation("MasterCvSourceFile")
+  tailoredPdf    TailoredCV[] @relation("TailoredCvPdf")
+  tailoredDocx   TailoredCV[] @relation("TailoredCvDocx")
+
+  @@index([userId, createdAt])
+  @@map("file_objects")
+}
+
+// ---------------------------------------------------------------------------
+// CVs
+// ---------------------------------------------------------------------------
+
+model MasterCV {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title     String
+  isDefault Boolean @default(false)
+  version   Int     @default(1)
+
+  sourceFileId String?     @db.Uuid
+  sourceFile   FileObject? @relation("MasterCvSourceFile", fields: [sourceFileId], references: [id], onDelete: SetNull)
+
+  /// Raw text extracted from the uploaded document.
+  rawText String? @db.Text
+  /// Structured CV document (see @jobpilot/shared CvDocumentSchema).
+  content Json
+  /// Which parts were parsed vs. entered by the user.
+  parseProvenance Json?
+  parsedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tailoredCvs TailoredCV[]
+  embedding   CvEmbedding?
+
+  @@index([userId, isDefault])
+  @@map("master_cvs")
+}
+
+model TailoredCV {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  masterCvId String   @db.Uuid
+  masterCv   MasterCV @relation(fields: [masterCvId], references: [id], onDelete: Cascade)
+
+  jobId String @db.Uuid
+  job   Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  templateId String?     @db.Uuid
+  template   CVTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  status  TailoredCvStatus @default(GENERATING)
+  version Int              @default(1)
+
+  /// Tailored CV document, same schema as MasterCV.content.
+  content Json
+  /// "Why this CV was changed" panel: keywords emphasised, experience
+  /// emphasised, skills matched, requirements absent from the master CV.
+  changeSummary Json?
+  /// Model, prompt version and token usage for auditability.
+  generationMeta Json?
+  failureReason  String?
+
+  pdfFileId  String?     @db.Uuid
+  pdfFile    FileObject? @relation("TailoredCvPdf", fields: [pdfFileId], references: [id], onDelete: SetNull)
+  docxFileId String?     @db.Uuid
+  docxFile   FileObject? @relation("TailoredCvDocx", fields: [docxFileId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  applications Application[]
+
+  @@unique([userId, jobId, version])
+  @@index([userId, createdAt])
+  @@index([jobId])
+  @@map("tailored_cvs")
+}
+
+model CVTemplate {
+  id          String  @id @default(uuid()) @db.Uuid
+  key         String  @unique
+  name        String
+  description String?
+  /// Rendering engine identifier, e.g. "docx-modern-ats".
+  engine      String
+  isSystem    Boolean @default(true)
+  isActive    Boolean @default(true)
+  /// Layout options: fonts, margins, section order, colour accents.
+  layout      Json
+  previewUrl  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tailoredCvs TailoredCV[]
+
+  @@map("cv_templates")
+}
+
+// ---------------------------------------------------------------------------
+// Companies & contacts
+// ---------------------------------------------------------------------------
+
+model Company {
+  id             String  @id @default(uuid()) @db.Uuid
+  name           String
+  /// Lower-cased, punctuation-stripped name used for deduplication.
+  normalizedName String  @unique
+  website        String?
+  domain         String? @unique
+  logoUrl        String?
+  industry       String?
+  sizeRange      String?
+  description    String? @db.Text
+  linkedinUrl    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jobs     Job[]
+  contacts Contact[]
+
+  @@index([name])
+  @@map("companies")
+}
+
+/// A professional contact discovered from a permitted public source.
+/// `email` is only ever populated when the address was published by the
+/// company or the person themselves — never guessed from a name pattern.
+model Contact {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  fullName   String
+  title      String?
+  role       ContactRole @default(OTHER)
+  profileUrl String?
+  email      String?     @db.Citext
+
+  /// Human-readable origin, e.g. "greenhouse:job-posting-contact".
+  source     String
+  sourceUrl  String?
+  /// 0..1 confidence that this person is a relevant hiring contact.
+  confidence Decimal @default(0) @db.Decimal(3, 2)
+
+  provenance      Provenance @default(KNOWN)
+  emailProvenance Provenance @default(NOT_FOUND)
+
+  discoveredAt DateTime  @default(now())
+  lastSeenAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  jobsAsPrimary  Job[]           @relation("JobPrimaryContact")
+  outreachDrafts OutreachDraft[]
+
+  @@unique([companyId, profileUrl])
+  @@unique([companyId, email])
+  @@index([companyId, confidence])
+  @@map("contacts")
+}
+
+// ---------------------------------------------------------------------------
+// Job sources & jobs
+// ---------------------------------------------------------------------------
+
+model JobSource {
+  id   String        @id @default(uuid()) @db.Uuid
+  key  String        @unique
+  name String
+  kind JobSourceKind
+
+  isEnabled Boolean @default(false)
+  /// True when the adapter needs credentials that are not present yet. The API
+  /// surfaces "<name> is not configured" rather than failing silently.
+  requiresCredentials Boolean @default(false)
+  /// Non-secret adapter configuration (board slugs, country codes, ...).
+  /// Secrets always come from environment variables, never from this column.
+  config Json?
+
+  /// Whether the platform's terms permit programmatic application submission.
+  supportsAutoApply Boolean @default(false)
+  termsUrl          String?
+  notes             String? @db.Text
+
+  requestsPerMinute Int             @default(30)
+  health            JobSourceHealth @default(UNKNOWN)
+  healthDetail      String?
+  lastHealthCheckAt DateTime?
+  lastSuccessAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jobs Job[]
+
+  @@index([isEnabled])
+  @@map("job_sources")
+}
+
+model Job {
+  id String @id @default(uuid()) @db.Uuid
+
+  sourceId String    @db.Uuid
+  source   JobSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  /// Identifier of the posting inside the source system.
+  externalJobId String
+
+  title     String
+  companyId String?  @db.Uuid
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  /// Company name exactly as the source reported it.
+  companyName    String
+  companyWebsite String?
+  companyLogo    String?
+
+  location        String?
+  locationCity    String?
+  locationCountry String?
+  remoteType      RemoteType      @default(UNKNOWN)
+  employmentType  EmploymentType  @default(UNKNOWN)
+  experienceLevel ExperienceLevel @default(UNKNOWN)
+
+  salaryMin    Int?
+  salaryMax    Int?
+  currency     String?      @db.VarChar(3)
+  salaryPeriod SalaryPeriod @default(UNKNOWN)
+  /// Set when the salary was parsed out of free text rather than a field.
+  salaryProvenance Provenance @default(NOT_FOUND)
+
+  /// Plain-text description used for AI analysis and full-text search.
+  description      String   @db.Text
+  descriptionHtml  String?  @db.Text
+  requirements     String[] @default([])
+  responsibilities String[] @default([])
+  skills           String[] @default([])
+
+  postedAt DateTime?
+  /// True when the source gave us a real posting date. "Latest jobs" only
+  /// ranks by a date we actually know.
+  postedAtKnown Boolean   @default(false)
+  discoveredAt  DateTime  @default(now())
+  expiresAt     DateTime?
+  isActive      Boolean   @default(true)
+
+  jobUrl         String
+  applicationUrl String?
+  applyMethod    ApplyMethod @default(EXTERNAL_URL)
+
+  /// Denormalised snapshot of the highest-confidence contact, kept in sync by
+  /// the contact-discovery service so the jobs table stays a single query.
+  primaryContactId  String?    @db.Uuid
+  primaryContact    Contact?   @relation("JobPrimaryContact", fields: [primaryContactId], references: [id], onDelete: SetNull)
+  recruiterName     String?
+  recruiterTitle    String?
+  recruiterEmail    String?    @db.Citext
+  contactSource     String?
+  contactConfidence Decimal?   @db.Decimal(3, 2)
+  contactProvenance Provenance @default(NOT_FOUND)
+
+  /// SHA-256 of (normalised title + company + location + description head),
+  /// used to catch the same posting appearing on two different sources.
+  contentHash String
+  /// Untouched source payload, for reprocessing without re-fetching.
+  rawPayload Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userJobs      UserJob[]
+  analyses      JobAnalysis[]
+  tailoredCvs   TailoredCV[]
+  searchResults JobSearchResult[]
+  applications  Application[]
+  outreach      OutreachDraft[]
+  embedding     JobEmbedding?
+
+  @@unique([sourceId, externalJobId])
+  @@index([contentHash])
+  @@index([postedAt(sort: Desc)])
+  @@index([discoveredAt(sort: Desc)])
+  @@index([companyName])
+  @@index([remoteType, employmentType, experienceLevel])
+  @@index([isActive, postedAt(sort: Desc)])
+  @@map("jobs")
+}
+
+/// Per-user state for a canonical job. Everything the spec lists as
+/// `Job.status` / `Job.relevanceScore` is served from here.
+model UserJob {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId  String @db.Uuid
+  job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  status         JobStatus @default(NEW)
+  relevanceScore Int?
+  isFavorite     Boolean   @default(false)
+  notes          String?   @db.Text
+  archivedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, jobId])
+  @@index([userId, status])
+  @@index([userId, relevanceScore(sort: Desc)])
+  @@map("user_jobs")
+}
+
+/// Structured AI comparison between a user's master CV and a job description.
+model JobAnalysis {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId  String @db.Uuid
+  job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  masterCvId String @db.Uuid
+
+  score              Int
+  recommendation     MatchRecommendation
+  matchingSkills     String[]            @default([])
+  missingSkills      String[]            @default([])
+  matchingExperience String[]            @default([])
+  missingExperience  String[]            @default([])
+  /// Per-dimension breakdown (skills, seniority, location, remote, ...).
+  breakdown Json?
+  reason    String @db.Text
+
+  provider      String
+  model         String
+  promptVersion String
+  tokensUsed    Int?
+  /// Always AI_INFERENCE — recorded explicitly so the UI can label it.
+  provenance    Provenance @default(AI_INFERENCE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, jobId, masterCvId])
+  @@index([userId, score(sort: Desc)])
+  @@map("job_analyses")
+}
+
+// ---------------------------------------------------------------------------
+// Searching
+// ---------------------------------------------------------------------------
+
+model JobSearch {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name     String?
+  keywords String[] @default([])
+  /// Normalised filter object (location, remote, salary, seniority, ...).
+  filters Json
+  /// JobSource keys requested for this run.
+  sourceKeys String[] @default([])
+
+  status SearchStatus @default(QUEUED)
+  /// Live progress payload streamed to the client over SSE.
+  progress Json?
+  /// BullMQ job id, for cancellation and queue inspection.
+  queueJobId String?
+
+  totalFound        Int      @default(0)
+  totalNew          Int      @default(0)
+  duplicatesRemoved Int      @default(0)
+  sourcesSucceeded  String[] @default([])
+  sourcesFailed     Json?
+
+  error       String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  results JobSearchResult[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("job_searches")
+}
+
+model JobSearchResult {
+  id       String    @id @default(uuid()) @db.Uuid
+  searchId String    @db.Uuid
+  search   JobSearch @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  jobId    String    @db.Uuid
+  job      Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  /// False when this job was already in the user's database before the run.
+  isNewToUser Boolean @default(true)
+  sourceKey   String
+  rank        Int?
+
+  createdAt DateTime @default(now())
+
+  @@unique([searchId, jobId])
+  @@index([jobId])
+  @@map("job_search_results")
+}
+
+model SavedSearch {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name     String
+  /// Same shape as JobSearch.keywords + filters + sourceKeys.
+  params   Json
+  isPinned Boolean @default(false)
+  /// Optional cron expression for scheduled re-runs.
+  scheduleCron String?
+  lastRunAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
+  @@map("saved_searches")
+}
+
+// ---------------------------------------------------------------------------
+// Applications
+// ---------------------------------------------------------------------------
+
+model Application {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId  String @db.Uuid
+  job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  tailoredCvId String?     @db.Uuid
+  tailoredCv   TailoredCV? @relation(fields: [tailoredCvId], references: [id], onDelete: SetNull)
+
+  status ApplicationStatus @default(DRAFT)
+  method ApplicationMethod @default(MANUAL)
+
+  coverLetter String? @db.Text
+  notes       String? @db.Text
+
+  appliedAt     DateTime?
+  interviewDate DateTime?
+  /// Reference returned by a permitted application API, when one exists.
+  externalReference String?
+  followUpAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events ApplicationEvent[]
+
+  @@unique([userId, jobId])
+  @@index([userId, status])
+  @@index([userId, appliedAt(sort: Desc)])
+  @@map("applications")
+}
+
+model ApplicationEvent {
+  id            String      @id @default(uuid()) @db.Uuid
+  applicationId String      @db.Uuid
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  type       ApplicationEventType
+  message    String?
+  payload    Json?
+  occurredAt DateTime             @default(now())
+
+  @@index([applicationId, occurredAt(sort: Desc)])
+  @@map("application_events")
+}
+
+// ---------------------------------------------------------------------------
+// Outreach
+// ---------------------------------------------------------------------------
+
+model OutreachDraft {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  contactId String  @db.Uuid
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  jobId     String? @db.Uuid
+  job       Job?    @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  channel OutreachChannel @default(EMAIL)
+  subject String?
+  body    String          @db.Text
+  status  OutreachStatus  @default(DRAFT)
+
+  /// Every send requires an explicit human approval; recorded here.
+  approvedAt  DateTime?
+  sentAt      DateTime?
+  respondedAt DateTime?
+  followUpAt  DateTime?
+
+  generationMeta Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([contactId])
+  @@map("outreach_drafts")
+}
+
+// ---------------------------------------------------------------------------
+// Vector search (pgvector). Prisma cannot select `Unsupported` columns, so
+// similarity queries run through $queryRaw in the search repository.
+// ---------------------------------------------------------------------------
+
+model JobEmbedding {
+  jobId     String                       @id @db.Uuid
+  job       Job                          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  model     String
+  dimension Int
+  embedding Unsupported("vector(1536)")?
+  createdAt DateTime                     @default(now())
+
+  @@map("job_embeddings")
+}
+
+model CvEmbedding {
+  masterCvId String                       @id @db.Uuid
+  masterCv   MasterCV                     @relation(fields: [masterCvId], references: [id], onDelete: Cascade)
+  model      String
+  dimension  Int
+  embedding  Unsupported("vector(1536)")?
+  createdAt  DateTime                     @default(now())
+
+  @@map("cv_embeddings")
+}
+
+// ---------------------------------------------------------------------------
+// Platform
+// ---------------------------------------------------------------------------
+
+model SystemSetting {
+  key         String   @id
+  value       Json
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
+model AuditLog {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String? @db.Uuid
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action     String
+  entityType String?
+  entityId   String?
+  /// Correlates a log entry with the request/queue job that produced it.
+  requestId String?
+  ipAddress String?
+  userAgent String?
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
