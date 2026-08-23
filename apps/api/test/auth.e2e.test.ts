@@ -269,6 +269,15 @@ describeIfDb('auth flow (e2e)', () => {
       // The successor issued in step one must be dead too.
       const live = await harness.prisma.refreshToken.count({ where: { userId, revokedAt: null } });
       expect(live).toBe(0);
+
+      // Reuse is the strongest signal that a refresh token has been stolen, so
+      // it has to reach the audit trail — the queryable, retained record an
+      // incident review actually reads — and not only the application log.
+      const audited = await harness.prisma.auditLog.findFirst({
+        where: { userId, action: 'auth.token_reuse_detected' },
+      });
+      expect(audited).not.toBeNull();
+      expect(audited?.entityType).toBe('RefreshTokenFamily');
     });
 
     it('rejects a request with no refresh token at all', async () => {

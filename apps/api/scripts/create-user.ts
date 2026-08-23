@@ -34,6 +34,9 @@ function parseArgs(argv: string[]): Args {
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
+    // pnpm forwards the `--` separator itself, so it arrives as an argument.
+    // Treating it as a flag makes the documented invocation fail immediately.
+    if (token === '--') continue;
     if (token === '--admin') {
       admin = true;
       continue;

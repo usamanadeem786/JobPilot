@@ -13,6 +13,15 @@ export default defineConfig({
     root: './',
     include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
     setupFiles: ['./test/setup.ts'],
+    /*
+     * The e2e suite talks to a real Postgres, which in practice is a managed
+     * one in another region: measured at ~500ms per round trip and ~2.5s to
+     * wake a scale-to-zero compute. A registration makes five or six queries,
+     * so Vitest's 5s default fails on latency rather than on a defect. Unit
+     * tests are unaffected — they never wait on anything.
+     */
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],

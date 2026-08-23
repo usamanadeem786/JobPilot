@@ -6,6 +6,7 @@ import { AppException } from '../../common/errors/app-exception';
 import { hashToken } from '../../common/crypto/encryption.service';
 import { ENV, type Env } from '../../config/config.module';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditAction, AuditService } from '../audit/audit.service';
 
 export interface TokenSubject {
   readonly id: string;
@@ -44,8 +45,34 @@ export class TokenService {
   constructor(
     private readonly jwt: JwtService,
     private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
     @Inject(ENV) private readonly env: Env,
   ) {}
+
+  /**
+   * Records a detected replay.
+   *
+   * Token reuse is the strongest signal available that a refresh token has
+   * been stolen, so it belongs in the audit trail and not only in the
+   * application log: the audit table is the queryable, retained record, and
+   * an incident review reads that rather than grepping stdout.
+   */
+  private async auditReuse(
+    userId: string,
+    familyId: string,
+    detail: string,
+    context: IssueContext,
+  ): Promise<void> {
+    await this.audit.record({
+      action: AuditAction.TokenReuseDetected,
+      userId,
+      entityType: 'RefreshTokenFamily',
+      entityId: familyId,
+      ...(context.ipAddress ? { ipAddress: context.ipAddress } : {}),
+      ...(context.userAgent ? { userAgent: context.userAgent } : {}),
+      metadata: { detail },
+    });
+  }
 
   async issue(subject: TokenSubject, context: IssueContext = {}): Promise<IssuedTokens> {
     return this.createPair(subject, randomUUID(), context);
@@ -76,6 +103,12 @@ export class TokenService {
         'Refresh token reuse detected; revoking token family',
       );
       await this.revokeFamily(stored.familyId);
+      await this.auditReuse(
+        stored.userId,
+        stored.familyId,
+        'A refresh token that had already been rotated was presented again.',
+        context,
+      );
       throw AppException.unauthorized('TOKEN_REUSE_DETECTED');
     }
 
@@ -102,6 +135,12 @@ export class TokenService {
         'Concurrent use of a single refresh token; revoking token family',
       );
       await this.revokeFamily(stored.familyId);
+      await this.auditReuse(
+        stored.userId,
+        stored.familyId,
+        'The same refresh token was used by two concurrent requests.',
+        context,
+      );
       throw AppException.unauthorized('TOKEN_REUSE_DETECTED');
     }
 

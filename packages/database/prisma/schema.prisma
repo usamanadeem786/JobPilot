@@ -23,8 +23,15 @@ generator client {
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
+  provider = "postgresql"
+  // Pooled connection for the application: a serverless deployment opens many
+  // short-lived clients, and a pooler keeps that from exhausting Postgres
+  // connection slots.
+  url = env("DATABASE_URL")
+  // Migrations need a DIRECT connection. The pooler multiplexes sessions, and
+  // migrate relies on advisory locks and session-scoped DDL state that do not
+  // survive that.
+  directUrl = env("DIRECT_URL")
   // `vector` is deliberately absent: pgvector is a Phase 5 dependency and
   // requiring it here forces every developer and every managed Postgres to
   // provide an extension nothing uses yet. It is added by the Phase 5
