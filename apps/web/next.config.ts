@@ -1,4 +1,6 @@
 import type { NextConfig } from 'next';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 /**
  * Where the browser's `/api/*` calls are forwarded.
@@ -21,14 +23,54 @@ import type { NextConfig } from 'next';
  * in the runtime environment produces a build with no rewrite at all, and
  * every /api call then falls through to the Next router and 404s.
  */
-const apiProxyTarget = process.env.API_PROXY_TARGET?.trim().replace(/\/+$/, '');
+/**
+ * Reads one variable out of the monorepo's root `.env`.
+ *
+ * Next only loads `.env` files sitting beside the app, but this repo keeps a
+ * single `.env` at the root — which is where the API reads it from too. Without
+ * this, `API_PROXY_TARGET` is simply absent in development, no rewrite is
+ * generated, and every API call 404s against the Next router. A real platform
+ * environment variable still wins; this is only the local fallback.
+ */
+function fromRootEnv(key: string): string | undefined {
+  if (process.env[key]) return process.env[key];
+
+  try {
+    const contents = readFileSync(resolve(process.cwd(), '../../.env'), 'utf8');
+    for (const line of contents.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+
+      const separator = trimmed.indexOf('=');
+      if (separator === -1) continue;
+      if (trimmed.slice(0, separator).trim() !== key) continue;
+
+      return trimmed
+        .slice(separator + 1)
+        .trim()
+        .replace(/^["']|["']$/g, '');
+    }
+  } catch {
+    // No root .env — a normal deployment, where the platform supplies the
+    // variable directly.
+  }
+
+  return undefined;
+}
+
+const apiProxyTarget = fromRootEnv('API_PROXY_TARGET')?.trim().replace(/\/+$/, '');
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   // Workspace packages ship compiled CommonJS; Next still needs to know they
   // are part of the monorepo so it resolves and re-bundles them correctly.
-  transpilePackages: ['@jobpilot/shared'],
+  //
+  // @jobpilot/cv is imported only via its `/schema` subpath, which is plain
+  // zod. The package root pulls in docx, pdf-lib, unpdf and mammoth, and docx
+  // uses a dynamic require that webpack cannot statically analyse — importing
+  // it from a client component fails the build outright.
+  transpilePackages: ['@jobpilot/shared', '@jobpilot/cv'],
   /*
    * Standalone output is what the Docker image runs, but producing it requires
    * creating symlinks, which Windows refuses without Developer Mode or an

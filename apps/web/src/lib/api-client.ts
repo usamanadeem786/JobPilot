@@ -190,9 +190,14 @@ export async function apiFetch<TResponse>(
 ): Promise<TResponse> {
   const { body, skipRefresh, headers, ...rest } = options;
 
+  // FormData carries its own multipart boundary in the Content-Type header,
+  // and only the browser can generate it. Setting that header by hand — or
+  // stringifying the body — makes the upload unreadable at the other end.
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+
   const send = async (): Promise<Response> => {
     const requestHeaders = new Headers(headers);
-    if (body !== undefined && !requestHeaders.has('Content-Type')) {
+    if (body !== undefined && !isFormData && !requestHeaders.has('Content-Type')) {
       requestHeaders.set('Content-Type', 'application/json');
     }
     if (accessToken) {
@@ -203,7 +208,9 @@ export async function apiFetch<TResponse>(
       ...rest,
       headers: requestHeaders,
       credentials: 'include',
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      ...(body !== undefined
+        ? { body: isFormData ? (body as FormData) : JSON.stringify(body) }
+        : {}),
     });
   };
 
@@ -263,6 +270,75 @@ export async function apiFetch<TResponse>(
   }
 
   return (await response.json()) as TResponse;
+}
+
+/**
+ * Fetches a file and hands it to the browser as a download.
+ *
+ * `apiFetch` cannot be reused: it parses every response as JSON, and a PDF is
+ * not JSON. The access token lives in memory rather than a cookie, so a plain
+ * link would arrive unauthenticated — the bytes have to come through fetch and
+ * be handed over as an object URL.
+ */
+export async function apiDownload(path: string, fallbackName: string): Promise<void> {
+  const requestHeaders = new Headers();
+  if (accessToken) requestHeaders.set('Authorization', `Bearer ${accessToken}`);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      headers: requestHeaders,
+      credentials: 'include',
+    });
+  } catch (error) {
+    throw new NetworkError(error);
+  }
+
+  if (response.status === 401) {
+    const refreshed = await refreshSession();
+    if (refreshed) {
+      const retryHeaders = new Headers();
+      if (accessToken) retryHeaders.set('Authorization', `Bearer ${accessToken}`);
+      response = await fetch(`${API_URL}${path}`, {
+        headers: retryHeaders,
+        credentials: 'include',
+      });
+    }
+  }
+
+  if (!response.ok) throw await toApiError(response);
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filenameFrom(response.headers.get('content-disposition'), fallbackName);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    // Revoked on the next tick: released synchronously, the click may not have
+    // started reading the blob yet and the download arrives empty.
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+}
+
+/** Reads the filename the server chose, falling back to one we supply. */
+export function filenameFrom(disposition: string | null, fallback: string): string {
+  if (!disposition) return fallback;
+
+  const quoted = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+  const name = quoted?.[1]?.trim();
+  if (!name) return fallback;
+
+  try {
+    // A server may percent-encode a non-ASCII name (RFC 5987).
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
 }
 
 export { API_URL, refreshSession };

@@ -1,5 +1,15 @@
 import { z } from 'zod';
 
+/*
+ * Exposed as `@jobpilot/cv/schema` as well as from the package root.
+ *
+ * The browser needs these types and this validator; it must not need the
+ * renderers. Importing the root pulls in docx, pdf-lib, unpdf and mammoth —
+ * server-only libraries that webpack cannot bundle at all (docx uses a dynamic
+ * require) and that would be pointless weight in a page even if it could.
+ * This file depends on nothing but zod.
+ */
+
 /**
  * The structured CV document.
  *
