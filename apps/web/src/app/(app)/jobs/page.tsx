@@ -107,6 +107,22 @@ function describeError(error: unknown): string {
 }
 
 function JobsError({ error, onRetry }: { error: unknown; onRetry(): void }): React.ReactElement {
+  // A 404 means the endpoint is not deployed yet — a state of the build, not
+  // a failure the user can retry their way out of.
+  const notDeployed = error instanceof ApiError && error.code === 'NOT_FOUND';
+
+  if (notDeployed) {
+    return (
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 rounded-lg border border-border bg-card p-6">
+        <h1 className="text-lg font-semibold">Job search is not available yet</h1>
+        <p className="text-sm text-muted-foreground">
+          The job sources, matching and CV tailoring are built and tested, but this deployment has no
+          jobs endpoint connected to them yet. Nothing is broken — the feature is not switched on.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col items-start gap-4 rounded-lg border border-destructive/40 bg-destructive/5 p-6">
       <div>

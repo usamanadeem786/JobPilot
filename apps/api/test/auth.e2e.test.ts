@@ -316,4 +316,31 @@ describeIfDb('auth flow (e2e)', () => {
       expect(response.headers['x-powered-by']).toBeUndefined();
     });
   });
+
+  describe('error contract', () => {
+    it('does not leak framework routing text for an unknown route', async () => {
+      // Nest answers an unmatched route with "Cannot GET /api/whatever", which
+      // names the method and internal path, tells the user nothing, and reads
+      // like a crash. It reached the UI as a red banner on the dashboard.
+      const response = await http().get('/api/definitely-not-a-route');
+
+      expect(response.status).toBe(404);
+      expect(response.body.code).toBe('NOT_FOUND');
+      expect(response.body.message).not.toMatch(/^Cannot GET/i);
+      expect(response.body.message).toBe('We could not find what you were looking for.');
+    });
+
+    it('still carries a request id so the response can be traced', async () => {
+      const response = await http().get('/api/definitely-not-a-route');
+      expect(response.body.requestId).toBeTruthy();
+      expect(response.body.path).toBe('/api/definitely-not-a-route');
+    });
+
+    it('keeps a genuine application message', async () => {
+      // Suppression must apply only to framework text, never to our own copy.
+      const response = await http().get('/api/users/me');
+      expect(response.body.message).toBe('Please sign in to continue.');
+    });
+  });
+
 });

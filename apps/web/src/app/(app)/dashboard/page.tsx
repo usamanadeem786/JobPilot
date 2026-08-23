@@ -20,6 +20,11 @@ import { BarList, SparkBars, StatCard } from '@/features/analytics/charts';
 import { useAuth } from '@/features/auth/auth-provider';
 import { ApiError, apiFetch } from '@/lib/api-client';
 
+/** True when the endpoint simply is not built on this deployment. */
+function isNotDeployed(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'NOT_FOUND';
+}
+
 /**
  * The dashboard.
  *
@@ -68,13 +73,29 @@ export default function DashboardPage(): React.ReactElement {
         </p>
       </header>
 
+      {/*
+        A 404 here means the jobs endpoint is not deployed yet, which is a
+        state of the build rather than a fault. Saying so plainly is more
+        honest than a red alarm — and than quietly rendering zeroes, which
+        would claim there are no jobs when in truth nothing was asked.
+      */}
       {jobsQuery.isError ? (
-        <div
-          role="alert"
-          className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
-        >
-          {jobsQuery.error instanceof ApiError ? jobsQuery.error.message : 'Could not load your dashboard.'}
-        </div>
+        isNotDeployed(jobsQuery.error) ? (
+          <p
+            role="status"
+            className="rounded-md border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground"
+          >
+            Job search is not available on this deployment yet, so these figures cover only what has
+            been set up so far.
+          </p>
+        ) : (
+          <div
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          >
+            {jobsQuery.error instanceof ApiError ? jobsQuery.error.message : 'Could not load your dashboard.'}
+          </div>
+        )
       ) : null}
 
       {jobsQuery.isPending ? (

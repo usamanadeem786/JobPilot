@@ -121,15 +121,35 @@ export class AllExceptionsFilter implements ExceptionFilter {
     };
   }
 
+  /**
+   * Nest's own text for an unmatched route: "Cannot GET /api/jobs".
+   *
+   * It names the HTTP method and the internal path, which tells a user
+   * nothing useful and reads like a framework crash rather than a product
+   * message. Recognised here so the mapped copy is used instead.
+   */
+  private static readonly FRAMEWORK_ROUTE_MESSAGE =
+    /^Cannot (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) /i;
+
   private messageOf(exception: HttpException): string | undefined {
     const payload = exception.getResponse();
-    if (typeof payload === 'string') return payload;
-    if (payload && typeof payload === 'object' && 'message' in payload) {
-      const { message } = payload as { message?: unknown };
-      if (typeof message === 'string') return message;
-      if (Array.isArray(message) && typeof message[0] === 'string') return message[0];
-    }
-    return undefined;
+
+    const raw =
+      typeof payload === 'string'
+        ? payload
+        : payload && typeof payload === 'object' && 'message' in payload
+          ? (() => {
+              const { message } = payload as { message?: unknown };
+              if (typeof message === 'string') return message;
+              if (Array.isArray(message) && typeof message[0] === 'string') return message[0];
+              return undefined;
+            })()
+          : undefined;
+
+    if (raw === undefined) return undefined;
+
+    // Fall through to the mapped ERROR_MESSAGES copy for framework text.
+    return AllExceptionsFilter.FRAMEWORK_ROUTE_MESSAGE.test(raw) ? undefined : raw;
   }
 
   private codeForStatus(status: number): ErrorCode {
