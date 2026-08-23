@@ -10,8 +10,12 @@ coverage/
 .env.local
 .env.*.local
 !.env.example
-storage/
-uploads/
+# Anchored to the repository root on purpose. A bare "storage/" matches a
+# directory of that name at any depth, which silently excluded the API's
+# storage *module* — source that has to be committed for the build to work.
+/storage/
+/uploads/
+apps/*/storage/
 *.log
 npm-debug.log*
 pnpm-debug.log*

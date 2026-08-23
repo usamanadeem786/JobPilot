@@ -3,6 +3,7 @@ export * from './errors';
 export * from './pagination';
 export * from './auth';
 export * from './profile';
+export * from './cv';
 export * from './jobs';
 export * from './applications';
 export * from './outreach';

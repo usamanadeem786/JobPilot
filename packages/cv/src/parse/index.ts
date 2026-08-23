@@ -60,8 +60,19 @@ export function parseCvDate(raw: string): CvDate | undefined {
   return { raw: trimmed };
 }
 
+/**
+ * A date range, e.g. "March 2021 – Present" or "2018 - 2021".
+ *
+ * The leading `\b` matters more than it looks. The optional month is
+ * `[a-z]{3,9}`, and without a boundary the engine will happily start matching
+ * inside a word: "Cambridge University 2019 – 2020" matches from "niversity",
+ * so removing the range to isolate the text leaves "Cambridge U". Any word
+ * longer than nine letters before a date loses its tail the same way —
+ * "Technology", "Engineering", "Intelligence" — which is a large share of real
+ * CVs.
+ */
 const DATE_RANGE =
-  /((?:[a-z]{3,9}\.?\s+)?(?:\d{1,2}[/.-])?(?:19|20)\d{2})\s*(?:–|—|-|to|until)\s*((?:[a-z]{3,9}\.?\s+)?(?:\d{1,2}[/.-])?(?:19|20)\d{2}|present|current|now|ongoing)/i;
+  /\b((?:[a-z]{3,9}\.?\s+)?(?:\d{1,2}[/.-])?(?:19|20)\d{2})\s*(?:–|—|-|to|until)\s*((?:[a-z]{3,9}\.?\s+)?(?:\d{1,2}[/.-])?(?:19|20)\d{2}|present|current|now|ongoing)/i;
 
 /**
  * Skills lines take two shapes: "Languages: Python, Go" and a bare list.
@@ -127,6 +138,18 @@ function parseExperience(lines: string[]): CvExperienceItem[] {
       // The role and employer sit on the date line itself or just above it.
       const withoutDates = line.replace(range[0], '').replace(/[|,–—-]+\s*$/, '').trim();
       const context = [...pendingHeaderLines, withoutDates].filter(Boolean);
+
+      // Many CVs put the job title and dates on one line and the employer on
+      // the line below. In that layout the date line yields a single field,
+      // which `splitRoleLine` can only read as the employer — losing the title
+      // and filing the role under a company that does not exist. Looking one
+      // line ahead recovers the pair.
+      const belowIndex = employerBelowIndex(lines, index);
+      if (context.length === 1 && belowIndex !== null) {
+        context.push(lines[belowIndex] as string);
+        index = belowIndex;
+      }
+
       const { company, title, location } = splitRoleLine(context);
 
       const endRaw = range[2];
@@ -147,7 +170,13 @@ function parseExperience(lines: string[]): CvExperienceItem[] {
     // the NEXT role, not an achievement of the current one. Without this
     // lookahead, "Backend Developer | Globex Ltd" is swallowed as a bullet of
     // the previous job and that employer is lost entirely.
-    if (!isBulletLine(line) && nextNonEmptyHasDateRange(lines, index)) {
+    //
+    // `couldBeRoleHeader` is what keeps that from going the other way. Not
+    // every CV marks its bullets — some are laid out with plain paragraphs —
+    // and there the last achievement of one role sits directly above the next
+    // role's dates. Treated as a header it becomes the employer, so a sentence
+    // out of the applicant's CV is filed as a company that does not exist.
+    if (!isBulletLine(line) && couldBeRoleHeader(line) && nextNonEmptyHasDateRange(lines, index)) {
       flush();
       pendingHeaderLines = [line];
       continue;
@@ -167,6 +196,52 @@ function parseExperience(lines: string[]): CvExperienceItem[] {
 
 function isBulletLine(line: string): boolean {
   return /^[•●▪‣⁃*\-–—+·]\s*/u.test(line);
+}
+
+/**
+ * The index of an employer line sitting directly beneath a date line.
+ *
+ * Strictly the next line, never across a blank one: a blank line is a
+ * paragraph break, and in a CV whose bullets carry no marker the first line
+ * after that break is an achievement, not a company. Reading it as the
+ * employer would put a sentence from the CV into the employer field — an
+ * invented company, which is exactly what must never happen.
+ *
+ * Prose is rejected for the same reason: company names are short and do not
+ * end in a full stop.
+ */
+const MAX_EMPLOYER_WORDS = 8;
+
+/**
+ * Whether a line could be a role header rather than an achievement.
+ *
+ * Headers are short noun phrases — "Senior Engineer | Acme". Achievements are
+ * sentences. The full stop is the strongest signal and the word count catches
+ * the rest; anything longer is prose whichever way it ends.
+ */
+const MAX_ROLE_HEADER_WORDS = 14;
+
+function couldBeRoleHeader(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (trimmed.endsWith('.')) return false;
+  if (trimmed.length > 120) return false;
+  return trimmed.split(/\s+/).length <= MAX_ROLE_HEADER_WORDS;
+}
+
+function employerBelowIndex(lines: string[], dateLineIndex: number): number | null {
+  const candidate = lines[dateLineIndex + 1];
+  if (!candidate) return null;
+
+  const trimmed = candidate.trim();
+  if (!trimmed) return null;
+  if (isBulletLine(trimmed)) return null;
+  if (DATE_RANGE.test(trimmed)) return null;
+  if (trimmed.endsWith('.')) return null;
+  if (trimmed.length > 80) return null;
+  if (trimmed.split(/\s+/).length > MAX_EMPLOYER_WORDS) return null;
+
+  return dateLineIndex + 1;
 }
 
 function nextNonEmptyHasDateRange(lines: string[], fromIndex: number): boolean {
@@ -214,19 +289,124 @@ function splitRoleLine(context: string[]): { company: string; title: string; loc
   return { company: combined.trim() || 'Unknown', title: '' };
 }
 
+/**
+ * Separates an employer from a trailing location.
+ *
+ * A middot is checked first because it is an explicit separator: "Acme ·
+ * Lahore, Pakistan" is one company and one two-part location, and splitting on
+ * the comma instead yields the company "Acme · Lahore" in a city called
+ * "Pakistan". Only when there is no explicit separator does the comma get to
+ * decide, and then only the last segment is taken as the location.
+ */
 function splitTrailingLocation(value: string): [string, string | undefined] {
+  const explicit = value.split(/\s*[·|]\s*/).map((part) => part.trim()).filter(Boolean);
+  if (explicit.length >= 2) {
+    return [explicit[0] as string, explicit.slice(1).join(', ')];
+  }
+
   const parts = value.split(',').map((part) => part.trim());
   if (parts.length >= 2) {
     return [parts.slice(0, -1).join(', '), parts.at(-1)];
   }
+
   return [value.trim(), undefined];
 }
 
+/** Words that mark a line as the name of a place of study rather than a award. */
+const INSTITUTION_WORDS =
+  /\b(university|universit[ée]|college|institute|institution|school|academy|polytechnic|seminary|conservatoire|uet|nust|fast)\b/i;
+
+/** Words that mark a line as the qualification itself. */
+const QUALIFICATION_WORDS =
+  /\b(bachelor|master|doctor|phd|dphil|mphil|bsc|b\.sc|ba|b\.a|beng|btech|be|msc|m\.sc|ma|m\.a|meng|mtech|mba|mres|llb|llm|md|associate|diploma|certificate|hnd|foundation|a-?levels?|gcse|matric|intermediate|fsc)\b/i;
+
+function looksLikeInstitution(value: string): boolean {
+  return INSTITUTION_WORDS.test(value);
+}
+
+function looksLikeQualification(value: string): boolean {
+  return QUALIFICATION_WORDS.test(value);
+}
+
+/**
+ * Marks of attainment, which sit on their own line under the degree.
+ *
+ * Classified before institution and qualification, because "First class
+ * honours" contains none of their words and would otherwise fall through to
+ * the catch-all and become a place of study.
+ */
+const GRADE_WORDS =
+  /\b(first class|second class|upper second|lower second|third class|distinction|merit|honou?rs|gpa|cgpa|grade|percentage|cum laude|magna|summa|[0-9]\.[0-9]{1,2}\s*\/\s*[0-9]|[1-3]:[12])\b/i;
+
+function looksLikeGrade(value: string): boolean {
+  return GRADE_WORDS.test(value);
+}
+
+/**
+ * Splits an education line into its fields.
+ *
+ * Commas are treated as a separator only as a last resort, and only when the
+ * split actually separates a qualification from a place of study. Institution
+ * names contain commas of their own — "University of Engineering and
+ * Technology, Lahore" is one institution, not an institution and a degree —
+ * and splitting on them unconditionally files the city as the qualification.
+ */
+function splitEducationLine(value: string): string[] {
+  const strong = value
+    .split(/\s*[|–—]\s*|\s+-\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (strong.length > 1) return strong;
+
+  const commaParts = value
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (commaParts.length === 2) {
+    const [first, second] = commaParts as [string, string];
+    const separatesTheTwo =
+      (looksLikeQualification(first) && looksLikeInstitution(second)) ||
+      (looksLikeInstitution(first) && looksLikeQualification(second));
+
+    if (separatesTheTwo) return commaParts;
+  }
+
+  return strong.length > 0 ? strong : [value.trim()].filter(Boolean);
+}
+
+/**
+ * Parses the education section.
+ *
+ * One entry is frequently spread over two lines — the qualification on one and
+ * the institution on the next, in either order — so a line cannot be assumed
+ * to be a whole entry. Treating each line as its own entry, as a naive reader
+ * does, produces two half-filled records per degree with the qualification
+ * sitting in the institution field.
+ *
+ * Where a line cannot be classified it becomes the institution, which is the
+ * field a bare "Harvard" or "Lahore Grammar School" almost always is. Nothing
+ * is invented to fill the other fields.
+ */
 function parseEducation(lines: string[]): CvEducationItem[] {
   const items: CvEducationItem[] = [];
+  let current: (CvEducationItem & { hasInstitution: boolean }) | null = null;
+
+  const flush = (): void => {
+    if (!current) return;
+    const { hasInstitution: _ignored, ...item } = current;
+    items.push(item);
+    current = null;
+  };
 
   for (const line of lines) {
+    // Blank lines are deliberately not treated as entry separators. DOCX
+    // extraction puts one between every paragraph, so doing so would split
+    // each degree away from its own grade. Which slots are already filled is
+    // the reliable signal, and it works the same for both formats.
     if (!line) continue;
+
     const cleaned = line.replace(/^[•●▪‣⁃*\-–—+·]\s*/u, '').trim();
     if (!cleaned) continue;
 
@@ -234,29 +414,85 @@ function parseEducation(lines: string[]): CvEducationItem[] {
     const yearOnly = /\b(19|20)\d{2}\b/.exec(cleaned);
     const withoutDates = cleaned.replace(range?.[0] ?? yearOnly?.[0] ?? '', '').trim();
 
-    const parts = withoutDates
-      .split(/\s*[|–—,]\s*|\s+-\s+/)
-      .map((part) => part.trim())
-      .filter(Boolean);
-    if (parts.length === 0) continue;
-
     const endDate = range?.[2]
       ? parseCvDate(range[2])
       : yearOnly
         ? parseCvDate(yearOnly[0])
         : undefined;
+    const startDate = range?.[1] ? parseCvDate(range[1]) : undefined;
 
-    items.push({
-      institution: parts[0] as string,
-      ...(parts[1] ? { qualification: parts[1] } : {}),
-      ...(parts[2] ? { field: parts[2] } : {}),
-      ...(range?.[1] ? { startDate: parseCvDate(range[1]) } : {}),
+    const parts = splitEducationLine(withoutDates);
+    if (parts.length === 0) continue;
+
+    // A line carrying both halves is a complete entry on its own.
+    if (parts.length >= 2) {
+      flush();
+      const institutionFirst = looksLikeInstitution(parts[0] as string) || !looksLikeQualification(parts[0] as string);
+      const institution = (institutionFirst ? parts[0] : parts[1]) as string;
+      const qualification = (institutionFirst ? parts[1] : parts[0]) as string;
+
+      // Left open rather than pushed, so a grade on the following line still
+      // has an entry to attach itself to.
+      current = {
+        institution,
+        qualification,
+        hasInstitution: true,
+        ...(parts[2] ? { field: parts[2] } : {}),
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+        bullets: [],
+      };
+      continue;
+    }
+
+    const only = parts[0] as string;
+    const isGrade = looksLikeGrade(only);
+    const isInstitution = !isGrade && looksLikeInstitution(only);
+    const isQualification = !isGrade && !isInstitution && looksLikeQualification(only);
+
+    // A grade belongs to the entry above it. Without this it becomes an
+    // institution of its own, and the CV grows a university called
+    // "First class honours".
+    if (current && isGrade && current.grade === undefined) {
+      current.grade = only;
+      continue;
+    }
+
+    // Fill the slot the current entry is missing; otherwise start a new one.
+    if (current && isInstitution && !current.hasInstitution) {
+      current.institution = only;
+      current.hasInstitution = true;
+      if (startDate) current.startDate = startDate;
+      if (endDate) current.endDate = endDate;
+      continue;
+    }
+
+    if (current && isQualification && current.qualification === undefined) {
+      current.qualification = only;
+      if (startDate) current.startDate = startDate;
+      if (endDate) current.endDate = endDate;
+      continue;
+    }
+
+    flush();
+    current = {
+      institution: isQualification ? '' : only,
+      hasInstitution: !isQualification,
+      ...(isQualification ? { qualification: only } : {}),
+      ...(startDate ? { startDate } : {}),
       ...(endDate ? { endDate } : {}),
       bullets: [],
-    });
+    };
   }
 
-  return items;
+  flush();
+
+  // An entry whose institution was never found keeps the qualification rather
+  // than being dropped: losing a degree is worse than an empty field, and the
+  // editor shows the gap for the user to complete.
+  return items.map((item) =>
+    item.institution ? item : { ...item, institution: item.qualification ?? 'Unknown' },
+  );
 }
 
 function sectionLines(sections: DetectedSection[], kind: CvSection): string[] {

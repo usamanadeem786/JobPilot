@@ -11,9 +11,11 @@
     "test:cov": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit && nest build && tsc -p tsconfig.tools.json",
-    "user:create": "tsx scripts/create-user.ts"
+    "user:create": "tsx scripts/create-user.ts",
+    "cv:check": "tsx scripts/cv-live-check.ts"
   },
   "dependencies": {
+    "@jobpilot/cv": "workspace:*",
     "@jobpilot/database": "workspace:*",
     "@jobpilot/shared": "workspace:*",
     "@nestjs/common": "^11.0.11",

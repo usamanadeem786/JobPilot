@@ -135,8 +135,12 @@ function toParagraphs(block: Block, template: TemplateStyle): Paragraph[] {
           tabStops: [{ type: TabStopType.RIGHT, position: twips(468) }],
           children: [
             new TextRun({ text: block.primary, bold: true, size: halfPoints(template.baseFontSize + 0.5) }),
+            // An em dash rather than two spaces. It reads better, and it keeps
+            // the pair recoverable: extracted back out of the file, "Senior
+            // Engineer Acme" cannot be split into a title and an employer
+            // again, whereas "Senior Engineer — Acme" can.
             ...(block.secondary
-              ? [new TextRun({ text: `  ${block.secondary}`, italics: true, color: '444444' })]
+              ? [new TextRun({ text: ` — ${block.secondary}`, italics: true, color: '444444' })]
               : []),
             ...(block.trailing ? [new TextRun({ text: `\t${block.trailing}`, color: '444444' })] : []),
           ],

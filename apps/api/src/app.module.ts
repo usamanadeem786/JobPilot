@@ -10,6 +10,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { AppConfigModule, ENV, type Env } from './config/config.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CvModule } from './modules/cv/cv.module';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { HealthModule } from './modules/health/health.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
@@ -72,6 +73,7 @@ import { UsersModule } from './modules/users/users.module';
     HealthModule,
     AuthModule,
     UsersModule,
+    CvModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

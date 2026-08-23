@@ -23,6 +23,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@jobpilot/cv':
+        specifier: workspace:*
+        version: link:../../packages/cv
       '@jobpilot/database':
         specifier: workspace:*
         version: link:../../packages/database

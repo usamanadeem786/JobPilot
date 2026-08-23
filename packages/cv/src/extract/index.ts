@@ -3,6 +3,7 @@ import { extractDocxText } from './docx';
 import { extractPdfText } from './pdf';
 
 export * from './detect';
+export { CorruptDocumentError } from './pdf';
 
 export interface ExtractionResult {
   readonly text: string;
