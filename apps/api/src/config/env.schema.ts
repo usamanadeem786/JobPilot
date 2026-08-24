@@ -123,7 +123,21 @@ export const EnvSchema = z
     GOOGLE_OAUTH_CLIENT_SECRET: optionalString,
     GITHUB_OAUTH_CLIENT_ID: optionalString,
     GITHUB_OAUTH_CLIENT_SECRET: optionalString,
+    /**
+     * Base of the AUTH routes, including the prefix — e.g.
+     * "https://app.example.com/api/auth". The provider's callback is this plus
+     * "/oauth/<provider>/callback", and that exact URL must be registered with
+     * the provider.
+     */
     OAUTH_CALLBACK_BASE_URL: optionalString,
+    /**
+     * Where the browser is sent after a third-party sign-in.
+     *
+     * Distinct from the callback base: that one points at the API's auth
+     * routes, this one at the site the user should land on. Deriving the
+     * second from the first produced redirects to "/api/auth/login".
+     */
+    WEB_APP_URL: optionalString,
 
     STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
     STORAGE_LOCAL_PATH: z.string().default('./storage'),

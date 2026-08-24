@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { PASSWORD_MIN_LENGTH } from '@jobpilot/shared';
 import { ApiError, ConfigurationError, NetworkError } from '@/lib/api-client';
 import { useAuth } from './auth-provider';
+import { OAuthButtons } from './oauth-buttons';
 
 /**
  * Maps a failed request onto the form.
@@ -155,6 +156,10 @@ export function LoginForm(): React.ReactElement {
             </Link>
           </p>
         </form>
+
+        <div className="mt-4">
+          <OAuthButtons />
+        </div>
       </CardContent>
     </Card>
   );

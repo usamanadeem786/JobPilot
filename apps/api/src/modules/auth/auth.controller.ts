@@ -1,10 +1,13 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Inject,
+  Param,
   Post,
+  Query,
   Req,
   Res,
 } from '@nestjs/common';
@@ -28,6 +31,7 @@ import { zodBody } from '../../common/pipes/zod-validation.pipe';
 import type { AuthenticatedUser, RequestWithUser } from '../../common/types/request';
 import { ENV, type Env } from '../../config/config.module';
 import { AuthService, type AuthResult } from './auth.service';
+import { OAuthService, type OAuthProviderStatus } from './oauth.service';
 import { clearRefreshCookie, readRefreshToken, setRefreshCookie } from './refresh-cookie';
 
 /** Tight limits on the endpoints an attacker would target with a script. */
@@ -37,6 +41,7 @@ const CREDENTIAL_THROTTLE = { auth: { limit: 5, ttl: 60_000 } };
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
+    private readonly oauth: OAuthService,
     @Inject(ENV) private readonly env: Env,
   ) {}
 
@@ -64,6 +69,66 @@ export class AuthController {
   ): Promise<AuthSession> {
     const result = await this.auth.login(body, contextFrom(request));
     return this.respondWithSession(result, response);
+  }
+
+  /** Which third-party sign-ins this deployment offers. */
+  @Public()
+  @Get('oauth/providers')
+  oauthProviders(): OAuthProviderStatus[] {
+    return this.oauth.providers();
+  }
+
+  /**
+   * Starts a third-party sign-in.
+   *
+   * A redirect rather than a JSON payload containing the URL: the browser has
+   * to leave for the provider either way, and returning the URL invites a
+   * client to build its own redirect and drop the signed `state` that is the
+   * whole CSRF defence.
+   */
+  @Public()
+  @Throttle(CREDENTIAL_THROTTLE)
+  @Get('oauth/:provider')
+  startOAuth(@Param('provider') provider: string, @Res() response: Response): void {
+    response.redirect(this.oauth.authorizeUrl(provider));
+  }
+
+  /**
+   * Where the provider sends the browser back to.
+   *
+   * Ends in a redirect to the web app, never a JSON body: this URL is opened
+   * by the browser directly, so a JSON response would leave the user staring
+   * at a token dump. The session cookie is set on the way through.
+   */
+  @Public()
+  @Throttle(CREDENTIAL_THROTTLE)
+  @Get('oauth/:provider/callback')
+  async oauthCallback(
+    @Param('provider') provider: string,
+    @Query('code') code: string | undefined,
+    @Query('state') state: string | undefined,
+    @Query('error') error: string | undefined,
+    @Req() request: RequestWithUser,
+    @Res() response: Response,
+  ): Promise<void> {
+    // Where the person should land, which is the site — not the auth routes.
+    const appUrl = webAppUrl(this.env);
+
+    // The user declined at the provider. Not an error worth a stack trace.
+    if (error || !code || !state) {
+      response.redirect(`${appUrl}/login?error=${encodeURIComponent(error ?? 'cancelled')}`);
+      return;
+    }
+
+    try {
+      const result = await this.oauth.complete(provider, code, state, contextFrom(request));
+      setRefreshCookie(response, this.env, result.refreshToken, result.refreshExpiresAt);
+      response.redirect(`${appUrl}/dashboard`);
+    } catch (failure) {
+      const message =
+        failure instanceof AppException ? failure.message : 'That sign-in could not be completed.';
+      response.redirect(`${appUrl}/login?error=${encodeURIComponent(message)}`);
+    }
   }
 
   @Public()
@@ -139,3 +204,20 @@ function contextFrom(request: RequestWithUser): { userAgent?: string; ipAddress?
     ...(request.ip ? { ipAddress: request.ip } : {}),
   };
 }
+
+/**
+ * The site to return to after a third-party sign-in.
+ *
+ * `WEB_APP_URL` when set. Otherwise derived by removing the API prefix from
+ * the callback base, which is the documented convention — but derivation is
+ * the fallback, not the design: reading the callback base as the site is what
+ * produced redirects to "/api/auth/login".
+ */
+function webAppUrl(env: Env): string {
+  const explicit = (env.WEB_APP_URL ?? '').replace(/\/+$/, '');
+  if (explicit) return explicit;
+
+  const callbackBase = (env.OAUTH_CALLBACK_BASE_URL ?? '').replace(/\/+$/, '');
+  return callbackBase.replace(/\/api\/auth$/, '');
+}
+

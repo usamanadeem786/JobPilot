@@ -40,6 +40,7 @@ export const ErrorCode = {
 
   // AI
   AI_PROVIDER_NOT_CONFIGURED: 'AI_PROVIDER_NOT_CONFIGURED',
+  OAUTH_NOT_CONFIGURED: 'OAUTH_NOT_CONFIGURED',
   AI_RESPONSE_INVALID: 'AI_RESPONSE_INVALID',
   AI_REQUEST_FAILED: 'AI_REQUEST_FAILED',
 
@@ -108,6 +109,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   NO_JOBS_FOUND: 'No jobs found for this search.',
 
   AI_PROVIDER_NOT_CONFIGURED: 'No AI provider is configured. Add an API key in settings.',
+  OAUTH_NOT_CONFIGURED: 'That sign-in provider is not configured on this deployment.',
   AI_RESPONSE_INVALID: 'The AI returned a response we could not verify, so nothing was saved.',
   AI_REQUEST_FAILED: 'The AI provider could not be reached.',
 
