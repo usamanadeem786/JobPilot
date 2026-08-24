@@ -12,31 +12,36 @@
 
 ## Hosting options
 
-### Everything on Vercel (Phase 1)
+### Why the API does not belong on Vercel
 
-This works today, with one caveat worth understanding before you rely on it.
+Put the **frontend** on Vercel and the **API** on a container host. This is not
+a preference; three things the API now does are incompatible with serverless
+functions.
 
-Vercel runs the API as a serverless function: request-scoped, no process
-between requests. For the API as it currently stands that is fine — it is a
-stateless REST service over Postgres. The parts that genuinely need a
-long-lived process are **Phase 3 features that do not exist yet**: the BullMQ
-workers that run job searches in the background, and the SSE stream that
-reports their progress. When those land, `apps/workers` will need a host that
-runs a real process (Railway, Render, Fly). The API itself can stay on Vercel.
+**A background worker has to stay alive.** Queued searches register a BullMQ
+worker at startup and it consumes jobs continuously. A serverless function
+exists only for the length of a request, so the worker is torn down the moment
+the response is sent and queued searches are never picked up.
 
-Two other serverless consequences to plan for:
+**SSE streams outlive a function.** `GET /api/jobs/search/:id/events` holds a
+connection open for the length of a search — routinely thirty seconds or more,
+because every board is fetched in turn and politely rate limited. Vercel caps
+function duration (10s on Hobby), so the stream is cut mid-search and the
+browser sees a failure rather than a result.
 
-- **Connection pooling.** Each warm function instance holds its own Prisma
-  pool, so many instances can exhaust Postgres connections. Use a pooled
-  connection string — Neon and Supabase both provide one (Neon's has
-  `-pooler` in the host). This matters more as traffic grows.
-- **Cold starts.** The first request after idle pays the Nest bootstrap. The
-  handler caches the app across warm invocations, so it is a per-instance cost,
-  not a per-request one.
+**Uploaded CVs need somewhere to live.** With `STORAGE_DRIVER=local` the files
+go to the container filesystem. On serverless that filesystem is gone after the
+invocation, so an uploaded CV cannot be downloaded again. Set `STORAGE_DRIVER=s3`
+if you must run somewhere ephemeral.
 
-Vercel does **not** provide a database. Attach one from the Marketplace
-(Neon has a first-party integration that sets `DATABASE_URL` for you) or create
-one at neon.tech / supabase.com and paste the string in.
+A fourth, smaller point: every warm function instance holds its own Prisma pool,
+so instances multiply Postgres connections. Neon's pooled string (`-pooler` in
+the host) makes this survivable, not free.
+
+The synchronous `POST /api/jobs/search` and the rest of the REST surface would
+work on Vercel. The queue, the progress stream and local uploads would not, and
+they fail in ways that look like the backend being down rather than a feature
+being unsupported.
 
 #### Two Vercel projects, one repository
 
@@ -171,8 +176,19 @@ the migration pre-deploy step and the health check. What Railway needs from you:
    created by the migration itself.
 5. Set the variables below, then deploy. `preDeployCommand` runs
    `prisma migrate deploy` before the new version takes traffic.
-6. **Generate a domain** on the service, then set `NEXT_PUBLIC_API_URL` in
-   Vercel to `https://<that-domain>/api` and redeploy the frontend.
+6. **Generate a domain** on the service, then point the frontend at it. Set
+   `API_PROXY_TARGET` on the Vercel project to `https://<that-domain>` —
+   without a trailing path — and **redeploy**.
+
+   Use `API_PROXY_TARGET`, not `NEXT_PUBLIC_API_URL`. The proxy keeps the
+   browser talking to its own origin, which means no CORS and, more
+   importantly, a first-party refresh cookie that `SameSite=Lax` still
+   protects. Pointing the browser straight at another domain makes that cookie
+   cross-site and forces the weaker `SameSite=None`.
+
+   `API_PROXY_TARGET` is read at **build** time — Next compiles rewrites into
+   `routes-manifest.json` — so setting it without redeploying produces a build
+   with no rewrite at all and every `/api` call 404s against the Next router.
 
 ### Variables to set on the Railway service
 
