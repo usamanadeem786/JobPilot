@@ -5,6 +5,7 @@ import {
   Clock,
   FileText,
   LayoutDashboard,
+  Mail,
   Search,
   Send,
   Settings,
@@ -34,6 +35,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/cvs', label: 'CVs', icon: FileText, available: true },
   { href: '/applications', label: 'Applications', icon: Send, available: true },
   { href: '/contacts', label: 'Contacts', icon: Users, available: true },
+  { href: '/outreach', label: 'Outreach', icon: Mail, available: true },
   { href: '/settings', label: 'Settings', icon: Settings, available: true },
 ];
 

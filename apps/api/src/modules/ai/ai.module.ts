@@ -3,6 +3,7 @@ import {
   CvTailoringService,
   JobMatchingService,
   LlmService,
+  OutreachDraftingService,
   analyseHeuristically,
   createProvider,
   type AnalyseJobInput,
@@ -13,6 +14,7 @@ import { ENV, type Env } from '../../config/config.module';
 export const LLM_SERVICE = Symbol('LLM_SERVICE');
 export const JOB_MATCHING_SERVICE = Symbol('JOB_MATCHING_SERVICE');
 export const CV_TAILORING_SERVICE = Symbol('CV_TAILORING_SERVICE');
+export const OUTREACH_SERVICE = Symbol('OUTREACH_SERVICE');
 
 /**
  * Wires the AI package into the application.
@@ -46,6 +48,11 @@ const providers: Provider[] = [
     provide: CV_TAILORING_SERVICE,
     inject: [LLM_SERVICE],
     useFactory: (llm: LlmService): CvTailoringService => new CvTailoringService(llm),
+  },
+  {
+    provide: OUTREACH_SERVICE,
+    inject: [LLM_SERVICE],
+    useFactory: (llm: LlmService): OutreachDraftingService => new OutreachDraftingService(llm),
   },
 ];
 

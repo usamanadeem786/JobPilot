@@ -17,6 +17,7 @@ import { CvModule } from './modules/cv/cv.module';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { HealthModule } from './modules/health/health.module';
 import { JobsModule } from './modules/jobs/jobs.module';
+import { OutreachModule } from './modules/outreach/outreach.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { UsersModule } from './modules/users/users.module';
 
@@ -82,6 +83,7 @@ import { UsersModule } from './modules/users/users.module';
     JobsModule,
     ApplicationsModule,
     ContactsModule,
+    OutreachModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

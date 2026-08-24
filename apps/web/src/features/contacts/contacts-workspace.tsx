@@ -1,7 +1,8 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as React from 'react';
+import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -34,10 +35,37 @@ interface ContactDto {
  * published, never constructed from a name and a domain.
  */
 export function ContactsWorkspace(): React.ReactElement {
+  const queryClient = useQueryClient();
+
   const query = useQuery({
     queryKey: ['contacts'],
     queryFn: () => apiFetch<ContactDto[]>('/contacts'),
   });
+
+  // A contact is always found via a job, so the job is known. Drafting needs
+  // both: the CV supplies the facts, the posting supplies the role.
+  const jobsForContacts = useQuery({
+    queryKey: ['contact-jobs'],
+    queryFn: () =>
+      apiFetch<{ items: { id: string; companyName: string }[] }>('/jobs?pageSize=100'),
+  });
+
+  const draft = useMutation({
+    mutationFn: ({ contactId, jobId }: { contactId: string; jobId: string }) =>
+      apiFetch<{ id: string }>('/outreach', {
+        method: 'POST',
+        body: { contactId, jobId },
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['outreach'] });
+      toast.success('Draft written. Read it on the Outreach page before approving.');
+    },
+    onError: (error: unknown) => toast.error(describeError(error)),
+  });
+
+  /** The job this contact was found through, matched by company. */
+  const jobIdFor = (contact: ContactDto): string | null =>
+    jobsForContacts.data?.items.find((job) => job.companyName === contact.companyName)?.id ?? null;
 
   const contacts = query.data ?? [];
 
@@ -97,6 +125,20 @@ export function ContactsWorkspace(): React.ReactElement {
               ) : (
                 <p className="text-sm text-muted-foreground">No published address.</p>
               )}
+
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={draft.isPending || jobIdFor(contact) === null}
+                  onClick={() => {
+                    const jobId = jobIdFor(contact);
+                    if (jobId) draft.mutate({ contactId: contact.id, jobId });
+                  }}
+                >
+                  {draft.isPending ? 'Writing…' : 'Draft an introduction'}
+                </Button>
+              </div>
 
               <p className="text-xs text-muted-foreground">
                 Found in {contact.source} on {formatDate(contact.discoveredAt)}

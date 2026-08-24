@@ -13,7 +13,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && nest build && tsc -p tsconfig.tools.json",
     "user:create": "tsx scripts/create-user.ts",
     "cv:check": "tsx scripts/cv-live-check.ts",
-    "env:check": "tsx scripts/check-env-file.ts"
+    "env:check": "tsx scripts/check-env-file.ts",
+    "verify": "tsx scripts/audit.ts",
+    "outreach:check": "tsx scripts/outreach-check.ts"
   },
   "dependencies": {
     "@jobpilot/ai": "workspace:*",

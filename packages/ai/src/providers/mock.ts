@@ -99,8 +99,32 @@ export function defaultResponder(request: RawCompletionRequest): string {
 
   if (/tailor/i.test(request.system)) return tailoringAnswer(prompt);
   if (/assess how well/i.test(request.system)) return analysisAnswer(prompt);
+  if (/short introduction/i.test(request.system)) return outreachAnswer(prompt);
 
   return '{}';
+}
+
+/**
+ * A placeholder introduction that makes no claims.
+ *
+ * The same reasoning as the tailoring stand-in: this text could be sent to a
+ * real hiring contact over the user's name, so it must not assert anything
+ * about them. It states plainly that it is a placeholder, which is both true
+ * and impossible to send by accident without noticing.
+ */
+function outreachAnswer(prompt: string): string {
+  const title = /Title:\s*(.+)/.exec(prompt)?.[1]?.trim() ?? 'the role';
+  const company = /Company:\s*(.+)/.exec(prompt)?.[1]?.trim() ?? 'your company';
+
+  return JSON.stringify({
+    subject: `Regarding the ${title} role`,
+    body:
+      'This is a placeholder written by the built-in mock provider, not by a ' +
+      `language model. It is addressed to ${company} about the ${title} role. ` +
+      'Configure a real AI provider to have an actual introduction drafted, or ' +
+      'replace this text yourself before approving it.',
+    claimsMade: [],
+  });
 }
 
 /** A stable pseudo-random number in [0, 1) for a string. */
