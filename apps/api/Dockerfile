@@ -34,6 +34,9 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc ./
 COPY packages/config/package.json packages/config/
 COPY packages/shared/package.json packages/shared/
 COPY packages/database/package.json packages/database/
+COPY packages/cv/package.json packages/cv/
+COPY packages/ai/package.json packages/ai/
+COPY packages/job-sources/package.json packages/job-sources/
 COPY apps/api/package.json apps/api/
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
@@ -41,11 +44,20 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 COPY packages/config packages/config
 COPY packages/shared packages/shared
 COPY packages/database packages/database
+COPY packages/cv packages/cv
+COPY packages/ai packages/ai
+COPY packages/job-sources packages/job-sources
 COPY apps/api apps/api
 
+# Built in dependency order. The API imports all of these, and each compiles
+# against the previous one's emitted declarations rather than its source, so
+# the order here is load-bearing rather than cosmetic.
 RUN pnpm --filter @jobpilot/database generate \
  && pnpm --filter @jobpilot/shared build \
  && pnpm --filter @jobpilot/database build \
+ && pnpm --filter @jobpilot/cv build \
+ && pnpm --filter @jobpilot/ai build \
+ && pnpm --filter @jobpilot/job-sources build \
  && pnpm --filter @jobpilot/api build
 
 # --- Runtime ---------------------------------------------------------------
