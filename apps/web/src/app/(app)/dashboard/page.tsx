@@ -47,9 +47,15 @@ export default function DashboardPage(): React.ReactElement {
 
   const jobs = React.useMemo(() => jobsQuery.data?.items ?? [], [jobsQuery.data]);
 
-  // Applications have no storage yet, so the pipeline shows its empty state
-  // rather than numbers derived from something else and presented as real.
-  const applications = React.useMemo<ApplicationLike[]>(() => [], []);
+  const applicationsQuery = useQuery({
+    queryKey: ['applications'],
+    queryFn: () => apiFetch<ApplicationLike[]>('/applications'),
+  });
+
+  const applications = React.useMemo<ApplicationLike[]>(
+    () => applicationsQuery.data ?? [],
+    [applicationsQuery.data],
+  );
 
   const summary = React.useMemo(() => summarise(jobs, applications), [jobs, applications]);
   const discovered = React.useMemo(
