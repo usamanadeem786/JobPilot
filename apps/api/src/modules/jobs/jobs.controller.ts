@@ -10,7 +10,10 @@ import {
   Patch,
   Post,
   Query,
+  Sse,
+  type MessageEvent,
 } from '@nestjs/common';
+import { Observable } from 'rxjs';
 import {
   JobBulkActionSchema,
   JobListQuerySchema,
@@ -29,10 +32,12 @@ import {
   type UpdateJobInput,
 } from '@jobpilot/shared';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AppException } from '../../common/errors/app-exception';
 import { zodBody, zodQuery } from '../../common/pipes/zod-validation.pipe';
 import type { AuthenticatedUser } from '../../common/types/request';
 import { JobAnalysisService, type AnalyseResult } from './job-analysis.service';
 import { JobIngestionService } from './job-ingestion.service';
+import { SearchRunnerService, type SearchProgress } from './search-runner.service';
 import { JobsService } from './jobs.service';
 
 @Controller('jobs')
@@ -41,6 +46,7 @@ export class JobsController {
     private readonly jobs: JobsService,
     private readonly ingestion: JobIngestionService,
     private readonly analysis: JobAnalysisService,
+    private readonly runner: SearchRunnerService,
   ) {}
 
   /**
@@ -102,6 +108,86 @@ export class JobsController {
   @Post('analyse')
   async analyseUnscored(@CurrentUser() user: AuthenticatedUser): Promise<AnalyseResult> {
     return this.analysis.analyseUnscored(user.id);
+  }
+
+  /**
+   * Queues a search and returns immediately.
+   *
+   * Preferred over POST /jobs/search, which holds the request open for the
+   * whole run. A search over several boards takes tens of seconds, which is
+   * past the point where proxies cut the connection.
+   */
+  @Post('search/async')
+  async searchAsync(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(zodBody(JobSearchRequestSchema)) body: JobSearchInput,
+  ): Promise<{ searchId: string }> {
+    return this.runner.enqueue(
+      user.id,
+      {
+        keywords: body.keywords,
+        ...(body.location ? { location: body.location } : {}),
+        ...(body.remoteOnly === undefined ? {} : { remoteOnly: body.remoteOnly }),
+        ...(body.minSalary === undefined ? {} : { minSalary: body.minSalary }),
+        limit: body.limit,
+      },
+      body.sources,
+    );
+  }
+
+  /** Progress for a queued search, as a single reading. */
+  @Get('search/:id/progress')
+  async searchProgress(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<SearchProgress> {
+    const progress = await this.runner.progressOf(user.id, id);
+    if (!progress) throw AppException.notFound('NOT_FOUND', 'That search could not be found.');
+    return progress;
+  }
+
+  /**
+   * Progress as a stream.
+   *
+   * Server-sent events rather than WebSockets: the traffic is one-way and
+   * short-lived, and SSE survives proxies and needs no separate protocol
+   * upgrade. The stream ends itself once the search finishes, so a forgotten
+   * tab does not hold a connection open indefinitely.
+   */
+  @Sse('search/:id/events')
+  searchEvents(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Observable<MessageEvent> {
+    return new Observable<MessageEvent>((subscriber) => {
+      let stopped = false;
+
+      const poll = async (): Promise<void> => {
+        while (!stopped) {
+          const progress = await this.runner.progressOf(user.id, id);
+
+          if (!progress) {
+            subscriber.error(new Error('That search could not be found.'));
+            return;
+          }
+
+          subscriber.next({ data: progress } as MessageEvent);
+
+          if (progress.status === 'completed' || progress.status === 'failed') {
+            subscriber.complete();
+            return;
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+        }
+      };
+
+      void poll();
+
+      return () => {
+        stopped = true;
+      };
+    });
   }
 
   @Post('bulk')

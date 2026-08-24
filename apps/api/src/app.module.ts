@@ -19,6 +19,7 @@ import { HealthModule } from './modules/health/health.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { OutreachModule } from './modules/outreach/outreach.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
+import { QueueModule } from './modules/queue/queue.module';
 import { UsersModule } from './modules/users/users.module';
 
 @Module({
@@ -73,6 +74,7 @@ import { UsersModule } from './modules/users/users.module';
     }),
 
     PrismaModule,
+    QueueModule,
     CryptoModule,
     AiModule,
     AuditModule,

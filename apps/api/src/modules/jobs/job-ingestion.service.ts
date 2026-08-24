@@ -62,6 +62,11 @@ export class JobIngestionService {
     userId: string,
     query: NormalisedQuery,
     onlySources?: readonly string[],
+    options: {
+      recordHistory?: boolean;
+      /** Called as each source starts and finishes, for progress reporting. */
+      onProgress?: (event: { stage: string; sourcesDone: string[] }) => void;
+    } = {},
   ): Promise<JobSearchResultDto> {
     const outcome = await searchAllSources(this.adapters, {
       query,
@@ -72,6 +77,26 @@ export class JobIngestionService {
         error: (message, meta) => this.logger.error({ meta }, message),
       },
       ...(onlySources ? { onlySources } : {}),
+      // Forwarded so a queued search can say which board it is on. A stream
+      // that only ever says "working" is no better than a spinner.
+      ...(options.onProgress
+        ? {
+            onProgress: (event) => {
+              const done: string[] = [];
+              if (event.type === 'source-started') {
+                options.onProgress?.({ stage: `Fetching from ${event.sourceKey}`, sourcesDone: done });
+              } else if (event.type === 'source-completed') {
+                done.push(event.sourceKey);
+                options.onProgress?.({
+                  stage: `${event.sourceKey} returned ${event.found} job${event.found === 1 ? '' : 's'}`,
+                  sourcesDone: done,
+                });
+              } else if (event.type === 'deduplicating') {
+                options.onProgress?.({ stage: 'Removing duplicates', sourcesDone: done });
+              }
+            },
+          }
+        : {}),
       // Identifies the crawler and points operators at the project, which is
       // the minimum courtesy for anything that fetches public pages.
       userAgent: this.env.HTTP_USER_AGENT,
@@ -118,7 +143,12 @@ export class JobIngestionService {
     // Recorded after the fact, so a search that failed outright leaves no
     // misleading "completed" row. History is worth keeping even for a run
     // that found nothing: "I already looked for that" is useful to know.
-    await this.recordSearch(userId, query, onlySources, result);
+    //
+    // Skipped when a background runner owns the row — it writes the outcome
+    // itself, and a second row would double every search in the history.
+    if (options.recordHistory !== false) {
+      await this.recordSearch(userId, query, onlySources, result);
+    }
 
     return result;
   }
