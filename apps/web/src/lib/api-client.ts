@@ -165,6 +165,33 @@ function isProxyFailure(response: Response): boolean {
   return !contentType.includes('application/json');
 }
 
+/**
+ * What to say when the proxy could not reach the backend.
+ *
+ * The same failure has two completely different causes depending on where the
+ * page is running, and one generic sentence sends people to debug the wrong
+ * one. On a developer's machine it almost always means the API process is not
+ * running; on a deployment it means API_PROXY_TARGET points somewhere that is
+ * not answering. Naming the likely cause is the difference between a one-line
+ * fix and an afternoon spent reading deployment settings.
+ */
+function proxyFailureMessage(): string {
+  const host = typeof window === 'undefined' ? '' : window.location.hostname;
+
+  if (LOOPBACK_HOST.test(host)) {
+    return (
+      'The API server is not responding. It usually is not running — start it ' +
+      'with `pnpm --filter @jobpilot/api dev`, then try again.'
+    );
+  }
+
+  return (
+    'The API could not be reached. This deployment forwards requests to a ' +
+    'backend that is not responding — check that the API is deployed and that ' +
+    'API_PROXY_TARGET points at it, then redeploy.'
+  );
+}
+
 async function toApiError(response: Response): Promise<ApiError> {
   let body: ApiErrorBody;
   try {
@@ -239,10 +266,7 @@ export async function apiFetch<TResponse>(
   }
 
   if (isProxyFailure(response)) {
-    throw new ConfigurationError(
-      'The API could not be reached. The server is configured to forward requests ' +
-        'to a backend that is not responding.',
-    );
+    throw new ConfigurationError(proxyFailureMessage());
   }
 
   // One retry, and only for an expired token: a 401 for any other reason
