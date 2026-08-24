@@ -25,6 +25,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { buildJobColumns, JOB_COLUMN_LABELS, type JobColumnActions } from './columns';
 import { downloadCsv, downloadXlsx, jobsToCsv } from './export';
+import { hasActiveFilters } from './query';
 
 export interface JobsTableProps {
   readonly jobs: readonly JobListItemDto[];
@@ -176,10 +177,21 @@ export function JobsTable(props: JobsTableProps): React.ReactElement {
             ) : table.getRowModel().rows.length === 0 ? (
               <tr>
                 <td colSpan={table.getVisibleLeafColumns().length} className="px-3 py-16 text-center">
-                  <p className="text-sm font-medium">No jobs found for this search.</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Try broader keywords, or configure more job sources in settings.
-                  </p>
+                  {hasActiveFilters(props.query) ? (
+                    <>
+                      <p className="text-sm font-medium">No jobs match these filters.</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Clear or widen them to see the rest of your list.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm font-medium">No jobs yet.</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Use &ldquo;Find new jobs&rdquo; above to search the configured job boards.
+                      </p>
+                    </>
+                  )}
                 </td>
               </tr>
             ) : (

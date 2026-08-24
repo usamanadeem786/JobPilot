@@ -248,3 +248,80 @@ export function formatSalary(salary: JobSalaryDto | null): string | null {
 
   return `${format((salary.min ?? salary.max) as number)}+${period}`;
 }
+
+/**
+ * Discovery: going out to the sources to find new postings.
+ *
+ * Deliberately separate from `JobListQuery`, which filters what is already
+ * stored. They read similarly and mean entirely different things — one is a
+ * database query, the other is a network fetch against every configured job
+ * board — and conflating them would either put a network call behind every
+ * keystroke or leave the user typing into a filter box wondering why no new
+ * jobs ever arrive.
+ */
+export const JobSearchRequestSchema = z.object({
+  keywords: z.string().trim().min(1, 'Enter something to search for.').max(200),
+  location: z.string().trim().max(160).optional(),
+  remoteOnly: z.boolean().optional(),
+  minSalary: z.number().int().min(0).max(100_000_000).optional(),
+  limit: z.number().int().min(1).max(200).default(50),
+  /** Restricts the run to these source keys; omit for every configured one. */
+  sources: z.array(z.string().trim().min(1).max(40)).min(1).optional(),
+});
+
+/** What a caller sends: `limit` may be omitted. */
+export type JobSearchRequest = z.input<typeof JobSearchRequestSchema>;
+
+/** What the handler receives: defaults applied. */
+export type JobSearchInput = z.infer<typeof JobSearchRequestSchema>;
+
+export interface JobSourceOutcome {
+  readonly sourceKey: string;
+  readonly reason: string;
+}
+
+/**
+ * What a discovery run actually did.
+ *
+ * Every number here is reported rather than summarised into a single "found
+ * N jobs", because they answer different questions: `found` is what the
+ * sources returned, `addedToUser` is what is new to this account, and a
+ * source that was skipped for want of credentials is not the same as one that
+ * failed. Collapsing them would hide a broken source behind a plausible total.
+ */
+export interface JobSearchResultDto {
+  readonly found: number;
+  readonly created: number;
+  readonly updated: number;
+  readonly addedToUser: number;
+  readonly duplicatesRemoved: number;
+  readonly sourcesSearched: string[];
+  readonly sourcesFailed: JobSourceOutcome[];
+  readonly sourcesSkipped: JobSourceOutcome[];
+}
+
+export interface JobSourceStatusDto {
+  readonly key: string;
+  readonly name: string;
+  readonly kind: string;
+  readonly isConfigured: boolean;
+  /** False for every source at launch; automated applying is opt-in per ToS. */
+  readonly supportsAutomatedApplication: boolean;
+  readonly termsUrl: string;
+  /** Why it cannot be used, when it cannot. Shown rather than hidden. */
+  readonly unavailableReason: string | null;
+}
+
+/** One line summarising a run, for a toast or a status region. */
+export function describeSearchResult(result: JobSearchResultDto): string {
+  if (result.found === 0) {
+    return 'No jobs matched that search.';
+  }
+
+  const added =
+    result.addedToUser === 0
+      ? 'all of them were already in your list'
+      : `${result.addedToUser} ${result.addedToUser === 1 ? 'is' : 'are'} new to you`;
+
+  return `Found ${result.found} job${result.found === 1 ? '' : 's'} — ${added}.`;
+}

@@ -4,6 +4,9 @@ import {
   JobListQuerySchema,
   type JobListItemDto,
   type JobListQuery,
+  type JobSearchRequest,
+  type JobSearchResultDto,
+  type JobSourceStatusDto,
   type Paginated,
 } from '@jobpilot/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -11,6 +14,7 @@ import * as React from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { JobDetailDrawer } from '@/features/jobs/job-detail';
+import { JobSearchPanel } from '@/features/jobs/job-search-panel';
 import { JobsTable } from '@/features/jobs/jobs-table';
 import { toSearchParams } from '@/features/jobs/query';
 import { ApiError, apiFetch, ConfigurationError } from '@/lib/api-client';
@@ -26,6 +30,32 @@ export default function JobsPage(): React.ReactElement {
   const queryClient = useQueryClient();
   const [query, setQuery] = React.useState<JobListQuery>(() => JobListQuerySchema.parse({}));
   const [detailJobId, setDetailJobId] = React.useState<string | null>(null);
+
+  const sourcesQuery = useQuery({
+    queryKey: ['job-sources'],
+    queryFn: () => apiFetch<JobSourceStatusDto[]>('/jobs/sources'),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const search = useMutation({
+    mutationFn: (request: JobSearchRequest) =>
+      apiFetch<JobSearchResultDto>('/jobs/search', { method: 'POST', body: request }),
+    onSuccess: async (result) => {
+      // The newest arrivals are what the user just asked for, so the list is
+      // reset to show them rather than leaving them on some later page behind
+      // whatever sort and filters happened to be set.
+      setQuery((current) => ({ ...current, page: 1, sortBy: 'discoveredAt', sortOrder: 'desc' }));
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+
+      if (result.found === 0) {
+        toast.info('No jobs matched that search. Try broader keywords or a wider location.');
+      } else if (result.addedToUser === 0) {
+        toast.info('Every match was already in your list.');
+      } else {
+        toast.success(`Added ${result.addedToUser} new job${result.addedToUser === 1 ? '' : 's'}.`);
+      }
+    },
+  });
 
   const jobsQuery = useQuery({
     queryKey: ['jobs', query],
@@ -82,6 +112,14 @@ export default function JobsPage(): React.ReactElement {
           </p>
         </div>
       </header>
+
+      <JobSearchPanel
+        sources={sourcesQuery.data ?? []}
+        isSearching={search.isPending}
+        result={search.data ?? null}
+        error={search.isError ? describeError(search.error) : null}
+        onSearch={(request) => search.mutate(request)}
+      />
 
       <JobsTable
         jobs={page?.items ?? []}

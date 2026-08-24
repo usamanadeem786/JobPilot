@@ -27,3 +27,32 @@ export function toSearchParams(query: JobListQuery): string {
 
   return params.toString();
 }
+
+/**
+ * Whether the user has narrowed the list at all.
+ *
+ * Drives the difference between "you have no jobs yet, run a search" and
+ * "your filters exclude everything, clear them". One empty table, two causes,
+ * and pointing at the wrong remedy makes the product look broken: telling
+ * someone with 400 stored jobs to go and search for more, because a status
+ * filter matched nothing, is not a helpful thing to say.
+ *
+ * Paging and sorting are excluded — neither narrows anything.
+ */
+export function hasActiveFilters(query: JobListQuery): boolean {
+  return Boolean(
+    query.search ||
+      query.status?.length ||
+      query.source?.length ||
+      query.remoteType?.length ||
+      query.employmentType?.length ||
+      query.experienceLevel?.length ||
+      query.company ||
+      query.location ||
+      query.minSalary !== undefined ||
+      query.minRelevance !== undefined ||
+      query.postedWithinDays !== undefined ||
+      query.hasContact ||
+      query.favouriteOnly,
+  );
+}

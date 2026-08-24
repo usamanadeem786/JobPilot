@@ -2,38 +2,23 @@ import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query
 import {
   JobBulkActionSchema,
   JobListQuerySchema,
+  JobSearchRequestSchema,
   UpdateJobSchema,
   type JobBulkAction,
   type JobDetailDto,
   type JobListItemDto,
   type JobListQuery,
+  type JobSearchInput,
+  type JobSearchResultDto,
+  type JobSourceStatusDto,
   type Paginated,
   type UpdateJobInput,
 } from '@jobpilot/shared';
-import { z } from 'zod';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { zodBody, zodQuery } from '../../common/pipes/zod-validation.pipe';
 import type { AuthenticatedUser } from '../../common/types/request';
-import { JobIngestionService, type IngestionResult, type SourceStatusDto } from './job-ingestion.service';
+import { JobIngestionService } from './job-ingestion.service';
 import { JobsService } from './jobs.service';
-
-/**
- * Search parameters for a discovery run.
- *
- * Separate from `JobListQuery`: listing reads what is already stored, this
- * goes out to the sources. Conflating them makes every page change hit the
- * network.
- */
-const SearchJobsSchema = z.object({
-  keywords: z.string().trim().min(1).max(200),
-  location: z.string().trim().max(160).optional(),
-  remoteOnly: z.boolean().optional(),
-  minSalary: z.number().int().min(0).max(100_000_000).optional(),
-  limit: z.number().int().min(1).max(200).default(50),
-  sources: z.array(z.string().trim().min(1).max(40)).min(1).optional(),
-});
-
-type SearchJobsInput = z.infer<typeof SearchJobsSchema>;
 
 @Controller('jobs')
 export class JobsController {
@@ -49,7 +34,7 @@ export class JobsController {
    * "sources" is read as a job id and the request fails UUID validation.
    */
   @Get('sources')
-  sources(): SourceStatusDto[] {
+  sources(): JobSourceStatusDto[] {
     return this.ingestion.sources();
   }
 
@@ -65,8 +50,8 @@ export class JobsController {
   @Post('search')
   async search(
     @CurrentUser() user: AuthenticatedUser,
-    @Body(zodBody(SearchJobsSchema)) body: SearchJobsInput,
-  ): Promise<IngestionResult> {
+    @Body(zodBody(JobSearchRequestSchema)) body: JobSearchInput,
+  ): Promise<JobSearchResultDto> {
     return this.ingestion.search(
       user.id,
       {

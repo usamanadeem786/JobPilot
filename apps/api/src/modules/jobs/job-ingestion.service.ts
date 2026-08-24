@@ -7,31 +7,11 @@ import {
   type NormalisedJob,
   type NormalisedQuery,
 } from '@jobpilot/job-sources';
+import type { JobSearchResultDto, JobSourceStatusDto } from '@jobpilot/shared';
 import type { Prisma } from '@jobpilot/database';
 import { ENV, type Env } from '../../config/config.module';
 import { PrismaService } from '../prisma/prisma.service';
 
-export interface IngestionResult {
-  readonly found: number;
-  readonly created: number;
-  readonly updated: number;
-  readonly addedToUser: number;
-  readonly duplicatesRemoved: number;
-  readonly sourcesSearched: string[];
-  readonly sourcesFailed: { readonly sourceKey: string; readonly reason: string }[];
-  readonly sourcesSkipped: { readonly sourceKey: string; readonly reason: string }[];
-}
-
-export interface SourceStatusDto {
-  readonly key: string;
-  readonly name: string;
-  readonly kind: string;
-  readonly isConfigured: boolean;
-  readonly supportsAutomatedApplication: boolean;
-  readonly termsUrl: string;
-  /** Why it cannot be used, when it cannot. Shown instead of hiding it. */
-  readonly unavailableReason: string | null;
-}
 
 /**
  * Fetches jobs from the configured sources and stores them.
@@ -55,7 +35,7 @@ export class JobIngestionService {
   ) {}
 
   /** What each source is, and why it is unavailable when it is. */
-  sources(): SourceStatusDto[] {
+  sources(): JobSourceStatusDto[] {
     const config = configFromEnv();
 
     return this.adapters.map((adapter) => {
@@ -78,7 +58,7 @@ export class JobIngestionService {
     userId: string,
     query: NormalisedQuery,
     onlySources?: readonly string[],
-  ): Promise<IngestionResult> {
+  ): Promise<JobSearchResultDto> {
     const outcome = await searchAllSources(this.adapters, {
       query,
       config: configFromEnv(),
