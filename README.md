@@ -6,10 +6,29 @@ Find roles from job sources that permit programmatic access, rank them against
 your CV, tailor that CV per job without inventing anything, and track every
 application in one place.
 
-**Status: Phase 1 complete.** Foundation, authentication and the app shell are
-built and tested. Job search, CV parsing and AI features land in later phases —
-see [docs/ROADMAP.md](docs/ROADMAP.md). Screens that are not built yet say so
-rather than showing placeholder data.
+**Status: all ten phases built.** Every screen is connected to a working
+endpoint, and 33 endpoints are exercised end to end against a live database by
+`pnpm --filter @jobpilot/api verify`.
+
+What is genuinely finished, and what that means in practice:
+
+| Area | State |
+| --- | --- |
+| Auth | Email/password with rotating refresh tokens; Google and GitHub sign-in |
+| Job sources | Greenhouse and Lever work with public board slugs. LinkedIn, Indeed and Glassdoor ship disabled — they need a partner agreement |
+| Search | Keyword and location, synchronous or queued with live progress over SSE |
+| CVs | PDF/DOCX upload, parsing, a section editor with autosave, five templates |
+| AI | Match scoring and CV tailoring. Runs on a keyword heuristic with no API key, and says so |
+| Applications | Pipeline with server-enforced transitions and an event log |
+| Contacts | Read only from what an employer published in a posting |
+| Outreach | Drafts with a mandatory human approval step. Nothing is sent automatically |
+| Queue | BullMQ when `REDIS_URL` is set; runs in-process otherwise |
+
+Two things to be clear about. Without an AI provider configured, match scores
+are keyword counts and tailoring returns your CV unchanged — both label
+themselves as such rather than passing for a model's work. And no email
+transport is configured by default, so outreach is approve-and-copy: JobPilot
+never sends on your behalf.
 
 ---
 
