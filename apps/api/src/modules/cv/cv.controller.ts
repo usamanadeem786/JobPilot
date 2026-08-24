@@ -25,6 +25,8 @@ import {
   type CvTemplateDto,
   type CvUploadResultDto,
   type MasterCvDetailDto,
+  type TailoredCvDetailDto,
+  type TailoredCvSummaryDto,
   type MasterCvSummaryDto,
   type UpdateMasterCvInput,
 } from '@jobpilot/shared';
@@ -32,6 +34,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AppException } from '../../common/errors/app-exception';
 import { zodBody } from '../../common/pipes/zod-validation.pipe';
 import type { AuthenticatedUser } from '../../common/types/request';
+import { CvTailoringService } from './cv-tailoring.service';
 import { CvService } from './cv.service';
 
 /** Express's Multer file, typed locally to avoid a dependency on its types. */
@@ -44,7 +47,10 @@ interface MulterFile {
 
 @Controller('cv')
 export class CvController {
-  constructor(private readonly cv: CvService) {}
+  constructor(
+    private readonly cv: CvService,
+    private readonly tailoring: CvTailoringService,
+  ) {}
 
   @Get('templates')
   templates(): CvTemplateDto[] {
@@ -53,6 +59,47 @@ export class CvController {
       name: template.name,
       description: template.description ?? null,
     }));
+  }
+
+  /** Every CV tailored to a specific job. */
+  @Get('tailored')
+  async listTailored(@CurrentUser() user: AuthenticatedUser): Promise<TailoredCvSummaryDto[]> {
+    return this.tailoring.list(user.id);
+  }
+
+  @Get('tailored/:id')
+  async getTailored(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<TailoredCvDetailDto> {
+    return this.tailoring.get(user.id, id);
+  }
+
+  @Get('tailored/:id/download')
+  async downloadTailored(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('format') format: string | undefined,
+    @Query('template') template: string | undefined,
+    @Res() response: Response,
+  ): Promise<void> {
+    if (format !== undefined && format !== 'pdf' && format !== 'docx') {
+      throw AppException.badRequest('VALIDATION_FAILED', 'Format must be "pdf" or "docx".');
+    }
+
+    this.send(
+      response,
+      await this.tailoring.render(user.id, id, format ?? 'pdf', template ?? DEFAULT_TEMPLATE_KEY),
+    );
+  }
+
+  /** Rewrites the default CV for one job. */
+  @Post('tailor/:jobId')
+  async tailor(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('jobId', ParseUUIDPipe) jobId: string,
+  ): Promise<TailoredCvDetailDto> {
+    return this.tailoring.generate(user.id, jobId);
   }
 
   @Get()

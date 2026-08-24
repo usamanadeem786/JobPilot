@@ -5,6 +5,7 @@ import {
   JobSearchRequestSchema,
   UpdateJobSchema,
   type JobBulkAction,
+  type JobAnalysisDto,
   type JobDetailDto,
   type JobListItemDto,
   type JobListQuery,
@@ -17,6 +18,7 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { zodBody, zodQuery } from '../../common/pipes/zod-validation.pipe';
 import type { AuthenticatedUser } from '../../common/types/request';
+import { JobAnalysisService, type AnalyseResult } from './job-analysis.service';
 import { JobIngestionService } from './job-ingestion.service';
 import { JobsService } from './jobs.service';
 
@@ -25,6 +27,7 @@ export class JobsController {
   constructor(
     private readonly jobs: JobsService,
     private readonly ingestion: JobIngestionService,
+    private readonly analysis: JobAnalysisService,
   ) {}
 
   /**
@@ -65,6 +68,12 @@ export class JobsController {
     );
   }
 
+  /** Scores this account's unscored jobs against its default CV. */
+  @Post('analyse')
+  async analyseUnscored(@CurrentUser() user: AuthenticatedUser): Promise<AnalyseResult> {
+    return this.analysis.analyseUnscored(user.id);
+  }
+
   @Post('bulk')
   async bulk(
     @CurrentUser() user: AuthenticatedUser,
@@ -79,6 +88,14 @@ export class JobsController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<JobDetailDto> {
     return this.jobs.get(user.id, id);
+  }
+
+  @Post(':id/analyse')
+  async analyseOne(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<JobAnalysisDto> {
+    return this.analysis.analyseOne(user.id, id);
   }
 
   @Patch(':id')

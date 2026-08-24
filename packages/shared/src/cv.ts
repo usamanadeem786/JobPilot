@@ -93,3 +93,39 @@ export const CV_UPLOAD_MESSAGES = {
     'No text could be read from that file. If it is a scan, it needs OCR before it can be parsed.',
   noFile: 'Choose a file to upload.',
 } as const;
+
+/**
+ * A CV rewritten for one job.
+ *
+ * Kept separate from the master CV, never overwriting it: the master is the
+ * user's record of their own history, and a tailored version is a derived
+ * artefact for a single application.
+ */
+export interface CvChangeSummaryDto {
+  readonly keywordsEmphasised: string[];
+  readonly experienceEmphasised: string[];
+  readonly skillsMatched: string[];
+  /** Requirements the CV does not evidence. Reported, never invented. */
+  readonly requirementsNotEvidenced: string[];
+  readonly sectionsReordered: boolean;
+  readonly notes?: string;
+}
+
+export interface TailoredCvSummaryDto {
+  readonly id: string;
+  readonly jobId: string;
+  readonly jobTitle: string;
+  readonly companyName: string;
+  readonly status: string;
+  readonly version: number;
+  readonly createdAt: string;
+}
+
+export interface TailoredCvDetailDto extends TailoredCvSummaryDto {
+  readonly content: unknown;
+  readonly changeSummary: CvChangeSummaryDto | null;
+  readonly failureReason: string | null;
+  /** Which model produced it, so a mock result is never taken for a real one. */
+  readonly model: string | null;
+  readonly promptVersion: string | null;
+}

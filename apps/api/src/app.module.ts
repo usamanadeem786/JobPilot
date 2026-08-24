@@ -8,6 +8,7 @@ import { CryptoModule } from './common/crypto/crypto.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AppConfigModule, ENV, type Env } from './config/config.module';
+import { AiModule } from './modules/ai/ai.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CvModule } from './modules/cv/cv.module';
@@ -70,6 +71,7 @@ import { UsersModule } from './modules/users/users.module';
 
     PrismaModule,
     CryptoModule,
+    AiModule,
     AuditModule,
     HealthModule,
     AuthModule,

@@ -5,6 +5,7 @@ import {
   type JobListItemDto,
   type JobListQuery,
   type JobSearchRequest,
+  type TailoredCvDetailDto,
   type JobSearchResultDto,
   type JobSourceStatusDto,
   type Paginated,
@@ -35,6 +36,46 @@ export default function JobsPage(): React.ReactElement {
     queryKey: ['job-sources'],
     queryFn: () => apiFetch<JobSourceStatusDto[]>('/jobs/sources'),
     staleTime: 5 * 60 * 1000,
+  });
+
+  const analyse = useMutation({
+    mutationFn: () =>
+      apiFetch<{ analysed: number; skipped: number; degradedReason: string | null }>(
+        '/jobs/analyse',
+        { method: 'POST', body: {} },
+      ),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+
+      if (result.analysed === 0) {
+        toast.info('Every job already has a score.');
+        return;
+      }
+
+      toast.success(
+        `Scored ${result.analysed} job${result.analysed === 1 ? '' : 's'} against your CV.`,
+      );
+
+      // A degraded run is reported separately rather than folded into the
+      // success message: the scores are real but they came from keyword
+      // counting, and presenting them as an AI reading would overstate them.
+      if (result.degradedReason) {
+        toast.warning(`Some scores used keyword matching instead: ${result.degradedReason}`);
+      }
+    },
+    onError: (error: unknown) => toast.error(describeError(error)),
+  });
+
+  const tailor = useMutation({
+    mutationFn: (jobId: string) =>
+      apiFetch<TailoredCvDetailDto>(`/cv/tailor/${jobId}`, { method: 'POST', body: {} }),
+    onSuccess: async (tailored) => {
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      toast.success(`CV tailored for ${tailored.jobTitle} at ${tailored.companyName}.`, {
+        description: tailored.changeSummary?.notes ?? undefined,
+      });
+    },
+    onError: (error: unknown) => toast.error(describeError(error)),
   });
 
   const search = useMutation({
@@ -91,9 +132,9 @@ export default function JobsPage(): React.ReactElement {
       onToggleFavourite: (job: JobListItemDto) =>
         updateJob.mutate({ id: job.id, patch: { isFavourite: !job.isFavourite } }),
       onOpenDetail: (job: JobListItemDto) => setDetailJobId(job.id),
-      onGenerateCv: () => toast.info('CV tailoring arrives in Phase 6. Upload a master CV first.'),
+      onGenerateCv: (job: JobListItemDto) => tailor.mutate(job.id),
     }),
-    [updateJob],
+    [updateJob, tailor],
   );
 
   if (jobsQuery.isError) {
@@ -111,6 +152,14 @@ export default function JobsPage(): React.ReactElement {
             Every role discovered from your configured sources.
           </p>
         </div>
+
+        <Button
+          variant="outline"
+          onClick={() => analyse.mutate()}
+          disabled={analyse.isPending}
+        >
+          {analyse.isPending ? 'Scoring…' : 'Score against my CV'}
+        </Button>
       </header>
 
       <JobSearchPanel

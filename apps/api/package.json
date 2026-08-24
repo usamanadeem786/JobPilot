@@ -16,6 +16,7 @@
     "env:check": "tsx scripts/check-env-file.ts"
   },
   "dependencies": {
+    "@jobpilot/ai": "workspace:*",
     "@jobpilot/cv": "workspace:*",
     "@jobpilot/database": "workspace:*",
     "@jobpilot/job-sources": "workspace:*",

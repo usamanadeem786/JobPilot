@@ -14,8 +14,12 @@ import {
 } from '@jobpilot/shared';
 import type { Prisma } from '@jobpilot/database';
 import { AppException } from '../../common/errors/app-exception';
+import { CvTailoringService } from '../cv/cv-tailoring.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildJobOrderBy, buildJobWhere } from './jobs.query';
+
+/** How many CVs one bulk action will generate. */
+const MAX_BULK_TAILORING = 5;
 
 /** Everything the row DTO needs, in one query rather than N. */
 const ROW_INCLUDE = {
@@ -30,7 +34,10 @@ type UserJobRow = Prisma.UserJobGetPayload<{ include: typeof ROW_INCLUDE }>;
 
 @Injectable()
 export class JobsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tailoring: CvTailoringService,
+  ) {}
 
   /**
    * Lists the user's jobs.
@@ -176,11 +183,37 @@ export class JobsService {
         return { updated: count };
       }
 
-      case 'generate-cv':
-        throw AppException.badRequest(
-          'VALIDATION_FAILED',
-          'Bulk CV generation is not available yet. Open a job and generate its CV there.',
-        );
+      case 'generate-cv': {
+        // Capped and run in series. Each one is a model call taking seconds,
+        // so an uncapped selection of 200 would hold the request open for many
+        // minutes and, on a paid provider, spend real money on one click.
+        // Proper batching belongs on the job queue; until then the limit is
+        // stated rather than silently applied.
+        if (action.jobIds.length > MAX_BULK_TAILORING) {
+          throw AppException.badRequest(
+            'VALIDATION_FAILED',
+            `Tailoring runs one CV at a time, so it is limited to ${MAX_BULK_TAILORING} jobs at once. Select fewer and try again.`,
+          );
+        }
+
+        const owned = await this.prisma.userJob.findMany({
+          where,
+          select: { jobId: true },
+        });
+
+        let generated = 0;
+        for (const { jobId } of owned) {
+          try {
+            await this.tailoring.generate(userId, jobId);
+            generated += 1;
+          } catch {
+            // One job failing must not abandon the rest of the selection.
+            // The count returned reflects what actually succeeded.
+          }
+        }
+
+        return { updated: generated };
+      }
     }
   }
 

@@ -23,6 +23,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@jobpilot/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@jobpilot/cv':
         specifier: workspace:*
         version: link:../../packages/cv
