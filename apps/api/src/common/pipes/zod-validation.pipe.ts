@@ -33,3 +33,16 @@ export function toFieldErrors(error: ZodError): ApiFieldError[] {
 export function zodBody<TSchema extends ZodTypeAny>(schema: TSchema): ZodValidationPipe<TSchema> {
   return new ZodValidationPipe(schema);
 }
+
+/**
+ * The same pipe, named for query strings.
+ *
+ * Identical behaviour - the distinction is at the call site, where
+ * `@Query(zodQuery(...))` says which half of the request is being validated.
+ * Query schemas do the heavier lifting of the two: everything arrives as a
+ * string, so they must coerce numbers and booleans rather than merely check
+ * them.
+ */
+export function zodQuery<TSchema extends ZodTypeAny>(schema: TSchema): ZodValidationPipe<TSchema> {
+  return new ZodValidationPipe(schema);
+}

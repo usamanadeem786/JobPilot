@@ -130,7 +130,30 @@ export function buildJobColumns(actions: JobColumnActions): ColumnDef<JobListIte
       id: 'salary',
       header: 'Salary',
       size: 170,
-      cell: ({ getValue }) => formatSalary(getValue()) ?? <NotStated />,
+      cell: ({ getValue }) => {
+        const salary = getValue();
+        const formatted = formatSalary(salary);
+        if (!formatted) return <NotStated />;
+
+        // A figure scraped out of the description is marked. The range printed
+        // in a job ad is often the whole level ladder, so showing it exactly
+        // like an employer-stated band would overstate what is known.
+        const isEstimate = salary?.provenance === 'AI_INFERENCE';
+
+        return (
+          <span className="inline-flex items-center gap-1">
+            {formatted}
+            {isEstimate ? (
+              <abbr
+                title="Read from the job description, not published as a salary field. Treat it as approximate."
+                className="cursor-help text-xs text-muted-foreground no-underline"
+              >
+                est.
+              </abbr>
+            ) : null}
+          </span>
+        );
+      },
     }),
 
     helper.accessor('employmentType', {

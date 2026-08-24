@@ -17,7 +17,7 @@ import type {
   SourceContext,
   SourceHealth,
 } from '../types';
-import { matchesQuery } from './greenhouse';
+import { selectBestMatches } from '../relevance';
 
 /**
  * Lever Postings.
@@ -74,22 +74,15 @@ export class LeverAdapter implements JobSourceAdapter {
     const perCompany = Math.max(1, Math.ceil(query.limit / Math.max(1, slugs.length)));
 
     for (const slug of slugs) {
-      let fromThisCompany = 0;
-
       try {
         const postings = await context.http.getJson<readonly LeverPosting[]>(
           `${BASE_URL}/${encodeURIComponent(slug)}?mode=json`,
           { skipRobots: true },
         );
 
-        for (const posting of postings) {
-          if (fromThisCompany >= perCompany) break;
-          const normalised = this.normalise(posting, slug);
-          if (matchesQuery(normalised, query)) {
-            results.push(normalised);
-            fromThisCompany += 1;
-          }
-        }
+        // Ranked before truncating, for the same reason as Greenhouse.
+        const normalised = postings.map((posting) => this.normalise(posting, slug));
+        results.push(...selectBestMatches(normalised, query, perCompany));
       } catch (error) {
         context.logger.warn('Lever board unavailable', {
           company: slug,

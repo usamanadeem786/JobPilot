@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { EmploymentType, ExperienceLevel, RemoteType, SalaryPeriod } from '@jobpilot/shared';
+import { EmploymentType, ExperienceLevel, Provenance, RemoteType, SalaryPeriod } from '@jobpilot/shared';
 import type { NormalisedSalary } from './types';
 
 export { htmlToText, decodeEntities } from './html';
@@ -100,7 +100,16 @@ export function parseSalaryFromText(text: string): NormalisedSalary | undefined 
 
   const currency = { $: 'USD', '£': 'GBP', '€': 'EUR' }[match[1]] ?? 'USD';
 
-  return { min, max, currency, period: inferPeriodFromAmount(min, text) };
+  return {
+    min,
+    max,
+    currency,
+    period: inferPeriodFromAmount(min, text),
+    // Read out of prose by a regex, not handed over as a field. The range in
+    // a job ad is frequently the whole level ladder rather than this role's
+    // band, so it is recorded as an inference and labelled as one.
+    provenance: Provenance.AI_INFERENCE,
+  };
 }
 
 function inferPeriodFromAmount(min: number, text: string): SalaryPeriod {

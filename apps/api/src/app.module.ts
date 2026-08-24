@@ -13,6 +13,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { CvModule } from './modules/cv/cv.module';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { HealthModule } from './modules/health/health.module';
+import { JobsModule } from './modules/jobs/jobs.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { UsersModule } from './modules/users/users.module';
 
@@ -74,6 +75,7 @@ import { UsersModule } from './modules/users/users.module';
     AuthModule,
     UsersModule,
     CvModule,
+    JobsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

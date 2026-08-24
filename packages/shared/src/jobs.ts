@@ -69,6 +69,12 @@ export interface JobSalaryDto {
   readonly max: number | null;
   readonly currency: string | null;
   readonly period: SalaryPeriod;
+  /**
+   * KNOWN when the source published the figure as a field, AI_INFERENCE when
+   * it was read out of the description. The table marks the second kind, so a
+   * number pulled from prose is never shown as an employer's stated offer.
+   */
+  readonly provenance: Provenance;
 }
 
 export interface JobContactDto {

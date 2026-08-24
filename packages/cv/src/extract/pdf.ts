@@ -114,8 +114,91 @@ function collectItems(items: readonly unknown[]): PositionedItem[] {
   return collected;
 }
 
-/** Groups runs into lines by baseline, then orders each line left to right. */
+/**
+ * Reads a page, one column at a time.
+ *
+ * Grouping purely by baseline is correct for a single column and wrong for
+ * everything else. A two-column CV puts "WORK EXPERIENCE" and "TECHNICAL
+ * SKILLS" at the same height, so a naive read emits them as one line and
+ * splices the sidebar into the body — every heading collides, and the parser
+ * finds no experience at all in a CV that plainly has some. Two-column
+ * templates are extremely common, so this is the normal case, not an edge one.
+ */
 function linesFromItems(items: PositionedItem[]): string {
+  if (items.length === 0) return '';
+
+  const columns = splitIntoColumns(items);
+  return columns.map((column) => linesFromColumn(column)).join('\n\n');
+}
+
+/**
+ * The x positions where the page is split into columns.
+ *
+ * A gutter is a vertical band that no text crosses. Finding one is not enough
+ * on its own: a single-column CV with right-aligned dates also has whitespace
+ * down the middle of some lines. What distinguishes a real column is that
+ * *nothing at all* spans the gap and both sides carry a substantial share of
+ * the text — so the merged occupied intervals, not the gaps in any one line,
+ * are what decide it.
+ */
+const MIN_GUTTER_POINTS = 18;
+const MIN_COLUMN_SHARE = 0.15;
+const MIN_ITEMS_TO_DETECT_COLUMNS = 25;
+
+function splitIntoColumns(items: PositionedItem[]): PositionedItem[][] {
+  if (items.length < MIN_ITEMS_TO_DETECT_COLUMNS) return [items];
+
+  const spans = items
+    .map((item) => [item.x, item.x + Math.max(item.width, 1)] as [number, number])
+    .sort((a, b) => a[0] - b[0]);
+
+  const merged: [number, number][] = [];
+  for (const span of spans) {
+    const last = merged[merged.length - 1];
+    if (last && span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
+    else merged.push([span[0], span[1]]);
+  }
+
+  if (merged.length < 2) return [items];
+
+  const boundaries: number[] = [];
+  for (let index = 0; index < merged.length - 1; index += 1) {
+    const gapStart = (merged[index] as [number, number])[1];
+    const gapEnd = (merged[index + 1] as [number, number])[0];
+    if (gapEnd - gapStart >= MIN_GUTTER_POINTS) boundaries.push((gapStart + gapEnd) / 2);
+  }
+
+  if (boundaries.length === 0) return [items];
+
+  const bands = partitionByBoundaries(items, boundaries);
+
+  // Every band has to be substantial. A narrow strip of page furniture — a
+  // rotated label, a margin note — is not a column, and treating it as one
+  // would reorder the document around it.
+  const threshold = items.length * MIN_COLUMN_SHARE;
+  if (bands.length < 2 || bands.some((band) => band.length < threshold)) return [items];
+
+  return bands;
+}
+
+function partitionByBoundaries(
+  items: PositionedItem[],
+  boundaries: number[],
+): PositionedItem[][] {
+  const bands: PositionedItem[][] = Array.from({ length: boundaries.length + 1 }, () => []);
+
+  for (const item of items) {
+    let band = 0;
+    while (band < boundaries.length && item.x >= (boundaries[band] as number)) band += 1;
+    (bands[band] as PositionedItem[]).push(item);
+  }
+
+  // Left to right, which is reading order for every CV template in use.
+  return bands.filter((band) => band.length > 0);
+}
+
+/** Groups one column's runs into lines by baseline, left to right. */
+function linesFromColumn(items: PositionedItem[]): string {
   if (items.length === 0) return '';
 
   // Top of the page first. PDF y grows upwards, so this is descending.
@@ -186,5 +269,43 @@ function joinLine(items: PositionedItem[]): string {
     previousCharWidth = item.text.length > 0 ? item.width / item.text.length : 0;
   }
 
-  return line.trimEnd();
+  return collapseLetterSpacing(line.trimEnd());
+}
+
+/**
+ * Repairs a line typeset with letter spacing.
+ *
+ * Designers track out headings, and the PDF then holds each glyph at its own
+ * position with a real gap between them. Faithfully reproduced that becomes
+ * "S o f t w a r e E n g i n e e r", which is what the user's job title looked
+ * like after extraction - unusable as a headline and unmatchable as a heading.
+ *
+ * Only lines that are overwhelmingly single characters are touched, so ordinary
+ * prose containing "a" or "I" is left exactly as written.
+ */
+function collapseLetterSpacing(line: string): string {
+  const tokens = line.split(' ').filter((token) => token.length > 0);
+  if (tokens.length < 6) return line;
+
+  const singles = tokens.filter((token) => token.length === 1).length;
+  if (singles / tokens.length < 0.75) return line;
+
+  // Runs of single characters rejoin into words; a longer token ends the run.
+  const words: string[] = [];
+  let current = '';
+
+  for (const token of tokens) {
+    if (token.length === 1) {
+      current += token;
+      continue;
+    }
+    if (current) {
+      words.push(current);
+      current = '';
+    }
+    words.push(token);
+  }
+  if (current) words.push(current);
+
+  return words.join(' ');
 }

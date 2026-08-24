@@ -128,7 +128,14 @@ export async function searchAllSources(
   // The overall limit is applied AFTER deduplication, not while collecting.
   // Truncating first would spend the budget on duplicates and starve whichever
   // sources ran last.
-  const jobs = dedupe.unique.slice(0, options.query.limit);
+  //
+  // Interleaving matters just as much. Sources are searched one after another
+  // and their results concatenated, so a plain slice hands the whole budget to
+  // whichever source ran first: three Greenhouse boards returning 42 jobs
+  // against a limit of 40 left Lever contributing nothing, and the search
+  // still reported Lever as searched - with no sign its results had been
+  // dropped.
+  const jobs = interleaveBySource(dedupe.unique).slice(0, options.query.limit);
 
   options.onProgress?.({
     type: 'completed',
@@ -155,4 +162,34 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): SourceConfi
   ] as const;
 
   return Object.fromEntries(keys.map((key) => [key, env[key]])) as SourceConfig;
+}
+
+/**
+ * Round-robins jobs so each source is represented from the first result on.
+ *
+ * Order within a source is preserved, so an adapter that ranked its own
+ * results by relevance keeps that ranking - it simply takes its turn.
+ */
+function interleaveBySource(jobs: readonly NormalisedJob[]): NormalisedJob[] {
+  const bySource = new Map<string, NormalisedJob[]>();
+
+  for (const job of jobs) {
+    const bucket = bySource.get(job.sourceKey);
+    if (bucket) bucket.push(job);
+    else bySource.set(job.sourceKey, [job]);
+  }
+
+  if (bySource.size <= 1) return [...jobs];
+
+  const queues = [...bySource.values()];
+  const interleaved: NormalisedJob[] = [];
+
+  for (let round = 0; interleaved.length < jobs.length; round += 1) {
+    for (const queue of queues) {
+      const job = queue[round];
+      if (job) interleaved.push(job);
+    }
+  }
+
+  return interleaved;
 }

@@ -29,6 +29,9 @@ importers:
       '@jobpilot/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@jobpilot/job-sources':
+        specifier: workspace:*
+        version: link:../../packages/job-sources
       '@jobpilot/shared':
         specifier: workspace:*
         version: link:../../packages/shared

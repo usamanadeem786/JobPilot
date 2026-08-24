@@ -1,6 +1,7 @@
 export * from './types';
 export * from './normalise';
 export * from './dedupe';
+export * from './relevance';
 export * from './http-client';
 export * from './registry';
 export { GreenhouseAdapter } from './adapters/greenhouse';

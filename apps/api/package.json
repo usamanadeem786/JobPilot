@@ -17,6 +17,7 @@
   "dependencies": {
     "@jobpilot/cv": "workspace:*",
     "@jobpilot/database": "workspace:*",
+    "@jobpilot/job-sources": "workspace:*",
     "@jobpilot/shared": "workspace:*",
     "@nestjs/common": "^11.0.11",
     "@nestjs/config": "^4.0.1",

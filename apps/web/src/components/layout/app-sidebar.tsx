@@ -31,7 +31,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/jobs', label: 'Jobs', icon: Briefcase, available: true },
   { href: '/latest', label: 'Latest', icon: Clock, available: true },
   { href: '/searches', label: 'Searches', icon: Search, available: false },
-  { href: '/cvs', label: 'CVs', icon: FileText, available: false },
+  { href: '/cvs', label: 'CVs', icon: FileText, available: true },
   { href: '/applications', label: 'Applications', icon: Send, available: false },
   { href: '/contacts', label: 'Contacts', icon: Users, available: false },
   { href: '/settings', label: 'Settings', icon: Settings, available: true },

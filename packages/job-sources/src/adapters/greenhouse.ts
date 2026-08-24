@@ -9,6 +9,7 @@ import {
   toPostedAt,
   toRemoteType,
 } from '../normalise';
+import { selectBestMatches } from '../relevance';
 import type {
   JobSourceAdapter,
   NormalisedJob,
@@ -75,8 +76,6 @@ export class GreenhouseAdapter implements JobSourceAdapter {
     const perBoard = Math.max(1, Math.ceil(query.limit / Math.max(1, tokens.length)));
 
     for (const token of tokens) {
-      let fromThisBoard = 0;
-
       try {
         // `content=true` returns the full description in the list response,
         // which avoids a second request per job.
@@ -85,14 +84,12 @@ export class GreenhouseAdapter implements JobSourceAdapter {
           { skipRobots: true },
         );
 
-        for (const job of response.jobs ?? []) {
-          if (fromThisBoard >= perBoard) break;
-          const normalised = this.normalise(job, token);
-          if (matchesQuery(normalised, query)) {
-            results.push(normalised);
-            fromThisBoard += 1;
-          }
-        }
+        // The whole board is normalised before anything is discarded. Cutting
+        // at the limit while iterating keeps whatever the board listed first,
+        // which is alphabetical - so a search for "engineer" filled up with
+        // "Account Executive" and the engineering roles never made it in.
+        const normalised = (response.jobs ?? []).map((job) => this.normalise(job, token));
+        results.push(...selectBestMatches(normalised, query, perBoard));
       } catch (error) {
         // One employer's board being unavailable must not fail the search.
         // The source reports partial results and the caller records which
@@ -187,31 +184,9 @@ function metadataValue(job: GreenhouseJob, name: string): string | undefined {
  * Local filtering, because the board API offers no query parameters. Keywords
  * are matched against the title and description; every term must appear.
  */
-export function matchesQuery(job: NormalisedJob, query: NormalisedQuery): boolean {
-  const terms = query.keywords
-    .toLowerCase()
-    .split(/\s+/)
-    .map((term) => term.trim())
-    .filter((term) => term.length > 1);
-
-  if (terms.length > 0) {
-    const haystack = `${job.title}\n${job.description}`.toLowerCase();
-    if (!terms.every((term) => haystack.includes(term))) return false;
-  }
-
-  if (query.remoteOnly && job.remoteType !== 'REMOTE') return false;
-
-  if (query.location) {
-    const wanted = query.location.toLowerCase();
-    const actual = (job.location ?? '').toLowerCase();
-    // "Remote" as a location matches a remote job wherever it is filed.
-    const remoteWanted = /remote|anywhere/.test(wanted);
-    if (!(remoteWanted && job.remoteType === 'REMOTE') && !actual.includes(wanted)) return false;
-  }
-
-  if (query.minSalary !== undefined && job.salary?.max !== undefined) {
-    if (job.salary.max < query.minSalary) return false;
-  }
-
-  return true;
-}
+/**
+ * Re-exported so existing importers and tests keep working. The logic now
+ * lives in `../relevance`, shared with every other adapter that has to filter
+ * a whole board locally.
+ */
+export { matchesQuery } from '../relevance';

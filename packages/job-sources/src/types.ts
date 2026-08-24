@@ -3,6 +3,7 @@ import type {
   EmploymentType,
   ExperienceLevel,
   JobSourceKind,
+  Provenance,
   RemoteType,
   SalaryPeriod,
 } from '@jobpilot/shared';
@@ -45,6 +46,16 @@ export interface NormalisedSalary {
   readonly max?: number;
   readonly currency?: string;
   readonly period: SalaryPeriod;
+  /**
+   * Where the figure came from.
+   *
+   * KNOWN when the source returned it as a structured field. AI_INFERENCE
+   * when it was read out of the description by pattern matching, which is a
+   * guess however plausible it looks - the range picked out of a job ad is
+   * often the whole ladder rather than this role's band. The UI must not
+   * present the two the same way.
+   */
+  readonly provenance: Provenance;
 }
 
 /**
