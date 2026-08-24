@@ -90,6 +90,26 @@ export default function JobsPage(): React.ReactElement {
     onError: (error: unknown) => toast.error(describeError(error)),
   });
 
+  const findContact = useMutation({
+    mutationFn: (jobId: string) =>
+      apiFetch<{ found: number; message: string | null }>(`/contacts/discover/${jobId}`, {
+        method: 'POST',
+        body: {},
+      }),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ['job', detailJobId] });
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      await queryClient.invalidateQueries({ queryKey: ['contacts'] });
+
+      if (result.found === 0) {
+        toast.info(result.message ?? 'No published contact in this posting.');
+        return;
+      }
+      toast.success(`Found ${result.found} contact${result.found === 1 ? '' : 's'} in the posting.`);
+    },
+    onError: (error: unknown) => toast.error(describeError(error)),
+  });
+
   const search = useMutation({
     mutationFn: (request: JobSearchRequest) =>
       apiFetch<JobSearchResultDto>('/jobs/search', { method: 'POST', body: request }),
@@ -200,6 +220,9 @@ export default function JobsPage(): React.ReactElement {
         onClose={() => setDetailJobId(null)}
         isTracking={trackApplication.isPending}
         onTrackApplication={(job) => trackApplication.mutate(job.id)}
+        isFindingContact={findContact.isPending}
+        onFindContact={(job) => findContact.mutate(job.id)}
+        contactMessage={findContact.data?.found === 0 ? findContact.data.message : null}
       />
     </div>
   );

@@ -12,6 +12,7 @@ import { AiModule } from './modules/ai/ai.module';
 import { ApplicationsModule } from './modules/applications/applications.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { ContactsModule } from './modules/contacts/contacts.module';
 import { CvModule } from './modules/cv/cv.module';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { HealthModule } from './modules/health/health.module';
@@ -80,6 +81,7 @@ import { UsersModule } from './modules/users/users.module';
     CvModule,
     JobsModule,
     ApplicationsModule,
+    ContactsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

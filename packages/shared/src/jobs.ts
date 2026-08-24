@@ -325,3 +325,23 @@ export function describeSearchResult(result: JobSearchResultDto): string {
 
   return `Found ${result.found} job${result.found === 1 ? '' : 's'} — ${added}.`;
 }
+
+/**
+ * A search that has already been run.
+ *
+ * Named "history" rather than "saved search" on purpose: nothing here runs on
+ * a schedule. Calling it saved would promise a background job the product
+ * does not yet have, and a user who expects overnight results would find none.
+ */
+export interface JobSearchHistoryDto {
+  readonly id: string;
+  readonly name: string | null;
+  readonly keywords: string[];
+  readonly filters: Record<string, unknown>;
+  readonly sourceKeys: string[];
+  readonly totalFound: number;
+  readonly totalNew: number;
+  readonly duplicatesRemoved: number;
+  readonly sourcesSucceeded: string[];
+  readonly ranAt: string;
+}

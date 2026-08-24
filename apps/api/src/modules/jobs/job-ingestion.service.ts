@@ -7,7 +7,11 @@ import {
   type NormalisedJob,
   type NormalisedQuery,
 } from '@jobpilot/job-sources';
-import type { JobSearchResultDto, JobSourceStatusDto } from '@jobpilot/shared';
+import type {
+  JobSearchHistoryDto,
+  JobSearchResultDto,
+  JobSourceStatusDto,
+} from '@jobpilot/shared';
 import type { Prisma } from '@jobpilot/database';
 import { ENV, type Env } from '../../config/config.module';
 import { PrismaService } from '../prisma/prisma.service';
@@ -100,7 +104,7 @@ export class JobIngestionService {
       if (await this.linkToUser(userId, outcomeForJob.jobId)) addedToUser += 1;
     }
 
-    return {
+    const result: JobSearchResultDto = {
       found: outcome.jobs.length,
       created,
       updated,
@@ -110,6 +114,76 @@ export class JobIngestionService {
       sourcesFailed: outcome.sourcesFailed,
       sourcesSkipped: outcome.sourcesSkipped,
     };
+
+    // Recorded after the fact, so a search that failed outright leaves no
+    // misleading "completed" row. History is worth keeping even for a run
+    // that found nothing: "I already looked for that" is useful to know.
+    await this.recordSearch(userId, query, onlySources, result);
+
+    return result;
+  }
+
+  /** Recent searches, most recent first. */
+  async history(userId: string, limit = 25): Promise<JobSearchHistoryDto[]> {
+    const rows = await this.prisma.jobSearch.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      keywords: row.keywords,
+      filters: (row.filters ?? {}) as Record<string, unknown>,
+      sourceKeys: row.sourceKeys,
+      totalFound: row.totalFound,
+      totalNew: row.totalNew,
+      duplicatesRemoved: row.duplicatesRemoved,
+      sourcesSucceeded: row.sourcesSucceeded,
+      ranAt: row.createdAt.toISOString(),
+    }));
+  }
+
+  async deleteFromHistory(userId: string, id: string): Promise<void> {
+    await this.prisma.jobSearch.deleteMany({ where: { id, userId } });
+  }
+
+  private async recordSearch(
+    userId: string,
+    query: NormalisedQuery,
+    onlySources: readonly string[] | undefined,
+    result: JobSearchResultDto,
+  ): Promise<void> {
+    try {
+      await this.prisma.jobSearch.create({
+        data: {
+          userId,
+          name: query.keywords,
+          keywords: query.keywords.split(/\s+/).filter(Boolean),
+          filters: {
+            ...(query.location ? { location: query.location } : {}),
+            ...(query.remoteOnly ? { remoteOnly: true } : {}),
+            ...(query.minSalary === undefined ? {} : { minSalary: query.minSalary }),
+            limit: query.limit,
+          } as Prisma.InputJsonValue,
+          sourceKeys: onlySources ? [...onlySources] : result.sourcesSearched,
+          status: 'COMPLETED',
+          totalFound: result.found,
+          totalNew: result.addedToUser,
+          duplicatesRemoved: result.duplicatesRemoved,
+          sourcesSucceeded: result.sourcesSearched,
+          sourcesFailed: result.sourcesFailed as unknown as Prisma.InputJsonValue,
+          completedAt: new Date(),
+        },
+      });
+    } catch (error) {
+      // History is a convenience. Losing a row must never fail the search
+      // that actually fetched the jobs.
+      this.logger.warn(
+        `Could not record search history: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
   }
 
   /**

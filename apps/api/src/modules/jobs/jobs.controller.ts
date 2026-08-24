@@ -1,4 +1,16 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   JobBulkActionSchema,
   JobListQuerySchema,
@@ -9,6 +21,7 @@ import {
   type JobDetailDto,
   type JobListItemDto,
   type JobListQuery,
+  type JobSearchHistoryDto,
   type JobSearchInput,
   type JobSearchResultDto,
   type JobSourceStatusDto,
@@ -39,6 +52,23 @@ export class JobsController {
   @Get('sources')
   sources(): JobSourceStatusDto[] {
     return this.ingestion.sources();
+  }
+
+  /** Searches already run, most recent first. */
+  @Get('searches')
+  async searchHistory(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<JobSearchHistoryDto[]> {
+    return this.ingestion.history(user.id);
+  }
+
+  @Delete('searches/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteSearch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    return this.ingestion.deleteFromHistory(user.id, id);
   }
 
   @Get()

@@ -29,11 +29,17 @@ export function JobDetailDrawer({
   onClose,
   onTrackApplication,
   isTracking = false,
+  onFindContact,
+  isFindingContact = false,
+  contactMessage = null,
 }: {
   jobId: string | null;
   onClose(): void;
   onTrackApplication?: (job: JobDetailDto) => void;
   isTracking?: boolean;
+  onFindContact?: (job: JobDetailDto) => void;
+  isFindingContact?: boolean;
+  contactMessage?: string | null;
 }): React.ReactElement | null {
   const detail = useQuery({
     queryKey: ['job', jobId],
@@ -148,6 +154,24 @@ export function JobDetailDrawer({
                   {isTracking ? 'Adding…' : 'Track this application'}
                 </Button>
               )}
+
+              {job.contact ? null : (
+                <Button
+                  variant="ghost"
+                  disabled={isFindingContact}
+                  onClick={() => onFindContact?.(job)}
+                >
+                  {isFindingContact ? 'Looking…' : 'Find contact'}
+                </Button>
+              )}
+
+              {/* Most postings name nobody. Saying so plainly beats an empty
+                  panel that reads as a failure. */}
+              {contactMessage ? (
+                <span role="status" className="text-sm text-muted-foreground">
+                  {contactMessage}
+                </span>
+              ) : null}
             </div>
           </div>
         )}
