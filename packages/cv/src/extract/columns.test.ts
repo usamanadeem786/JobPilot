@@ -141,6 +141,11 @@ describe('letter-spaced headings', () => {
       { text: 'JANE COOPER', x: 50, y: 800, size: 18 },
       { text: spaced, x: 50, y: 778 },
       { text: 'jane@example.com', x: 50, y: 758 },
+      // Body text so the document clears the "this is a scan" floor. Without
+      // it the page holds 43 characters, extraction rejects it as an image
+      // before letter spacing is ever considered, and the test fails for a
+      // reason that has nothing to do with what it is checking.
+      { text: 'Backend engineer with eight years building payment systems.', x: 50, y: 740 },
     ]);
 
     const { text } = await extractCvText(pdf, 'application/pdf');

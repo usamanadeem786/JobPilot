@@ -16,6 +16,13 @@ coverage/
 /storage/
 /uploads/
 apps/*/storage/
+
+# Anywhere secrets get pasted. .env is covered above, but a file named
+# env.txt or api-service.env is the same thing with a different name, and
+# only one of them needs to slip through once.
+env.txt
+*.env
+!.env.example
 *.log
 npm-debug.log*
 pnpm-debug.log*

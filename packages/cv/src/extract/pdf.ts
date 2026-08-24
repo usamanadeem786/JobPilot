@@ -55,6 +55,12 @@ const PARAGRAPH_GAP_RATIO = 1.6;
  */
 const SPACE_GAP_RATIO = 0.28;
 
+/**
+ * A gap this many times the character width is a word break rather than
+ * letter spacing. Only used to mark the boundary so it survives assembly.
+ */
+const WORD_GAP_RATIO = 1.2;
+
 export async function extractPdfText(buffer: Buffer): Promise<string> {
   let document: Awaited<ReturnType<typeof getDocumentProxy>>;
   try {
@@ -143,7 +149,25 @@ function linesFromItems(items: PositionedItem[]): string {
  */
 const MIN_GUTTER_POINTS = 18;
 const MIN_COLUMN_SHARE = 0.15;
-const MIN_ITEMS_TO_DETECT_COLUMNS = 25;
+const MIN_ITEMS_TO_DETECT_COLUMNS = 8;
+
+/**
+ * A real column occupies many lines of its own and carries a real share of the
+ * words. These two guards are what separate a sidebar from right-aligned
+ * dates, and they are needed because the obvious signals do not work:
+ *
+ *  - Item count alone is too weak. A one-column CV with a right-aligned date
+ *    on every role can easily put a fifth of its runs on the right.
+ *  - "Do the two sides share baselines?" sounds decisive and is not. A
+ *    sidebar's rows line up with the body's rows often enough - that is
+ *    exactly why the spliced output looked plausible in the first place.
+ *
+ * What genuinely differs is substance. A date column is a handful of short
+ * strings on lines that belong to the left; a sidebar is many lines and a
+ * meaningful fraction of the text.
+ */
+const MIN_COLUMN_LINES = 4;
+const MIN_COLUMN_TEXT_SHARE = 0.15;
 
 function splitIntoColumns(items: PositionedItem[]): PositionedItem[][] {
   if (items.length < MIN_ITEMS_TO_DETECT_COLUMNS) return [items];
@@ -178,7 +202,32 @@ function splitIntoColumns(items: PositionedItem[]): PositionedItem[][] {
   const threshold = items.length * MIN_COLUMN_SHARE;
   if (bands.length < 2 || bands.some((band) => band.length < threshold)) return [items];
 
+  const totalCharacters = items.reduce((sum, item) => sum + item.text.trim().length, 0);
+
+  for (const band of bands) {
+    if (distinctBaselines(band) < MIN_COLUMN_LINES) return [items];
+
+    const characters = band.reduce((sum, item) => sum + item.text.trim().length, 0);
+    if (totalCharacters > 0 && characters / totalCharacters < MIN_COLUMN_TEXT_SHARE) {
+      return [items];
+    }
+  }
+
   return bands;
+}
+
+/** How many separate lines a band occupies, at the line-grouping tolerance. */
+function distinctBaselines(items: readonly PositionedItem[]): number {
+  const baselines: number[] = [];
+
+  for (const item of [...items].sort((a, b) => b.y - a.y)) {
+    const last = baselines[baselines.length - 1];
+    if (last === undefined || Math.abs(last - item.y) > SAME_LINE_TOLERANCE) {
+      baselines.push(item.y);
+    }
+  }
+
+  return baselines.length;
 }
 
 function partitionByBoundaries(
@@ -257,11 +306,29 @@ function joinLine(items: PositionedItem[]): string {
   let previousCharWidth = 0;
 
   for (const item of ordered) {
+    // pdf.js emits an inter-word space in a letter-spaced heading as a run of
+    // its own, containing nothing but a space. That lone run is the only
+    // surviving record of where one word ends and the next begins, so it is
+    // marked with a double space and the boundary reaches the repair below.
+    // Normalisation collapses it again afterwards.
+    if (item.text.trim().length === 0) {
+      if (!line.endsWith('  ')) line += line.endsWith(' ') ? ' ' : '  ';
+      previousEnd = item.x + item.width;
+      continue;
+    }
+
     if (previousEnd !== null) {
       const gap = item.x - previousEnd;
       const threshold = Math.max(previousCharWidth * SPACE_GAP_RATIO, 0.5);
       const needsSpace = gap > threshold && !line.endsWith(' ') && !item.text.startsWith(' ');
-      if (needsSpace) line += ' ';
+      if (needsSpace) {
+        // A markedly wider gap gets two spaces. In a letter-spaced heading
+        // every glyph is its own run, so the space between letters and the
+        // space between words would otherwise be identical by the time the
+        // string is assembled - and the word boundary would be unrecoverable.
+        // The extra space is collapsed again during normalisation.
+        line += gap > Math.max(previousCharWidth * WORD_GAP_RATIO, threshold * 3) ? '  ' : ' ';
+      }
     }
 
     line += item.text;
@@ -290,22 +357,13 @@ function collapseLetterSpacing(line: string): string {
   const singles = tokens.filter((token) => token.length === 1).length;
   if (singles / tokens.length < 0.75) return line;
 
-  // Runs of single characters rejoin into words; a longer token ends the run.
-  const words: string[] = [];
-  let current = '';
-
-  for (const token of tokens) {
-    if (token.length === 1) {
-      current += token;
-      continue;
-    }
-    if (current) {
-      words.push(current);
-      current = '';
-    }
-    words.push(token);
-  }
-  if (current) words.push(current);
-
-  return words.join(' ');
+  // Wide gaps are the word boundaries; single gaps are the letter spacing.
+  // Splitting on the wide ones first is what keeps "Software Engineer" from
+  // collapsing into "SoftwareEngineer".
+  return line
+    .trim()
+    .split(/\s{2,}/)
+    .map((word) => word.replace(/\s+/g, ''))
+    .filter(Boolean)
+    .join(' ');
 }
