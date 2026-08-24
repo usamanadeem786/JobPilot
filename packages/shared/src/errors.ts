@@ -51,6 +51,7 @@ export const ErrorCode = {
   // Applications
   AUTOMATED_APPLICATION_NOT_PERMITTED: 'AUTOMATED_APPLICATION_NOT_PERMITTED',
   APPLICATION_ALREADY_EXISTS: 'APPLICATION_ALREADY_EXISTS',
+  INVALID_STATE_TRANSITION: 'INVALID_STATE_TRANSITION',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -117,4 +118,5 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   AUTOMATED_APPLICATION_NOT_PERMITTED:
     'This platform does not permit automated applications. Use “Apply manually” to open the official application page.',
   APPLICATION_ALREADY_EXISTS: 'You already have an application tracked for this job.',
+  INVALID_STATE_TRANSITION: 'That is not a valid next step for this application.',
 };

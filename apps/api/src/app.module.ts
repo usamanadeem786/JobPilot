@@ -9,6 +9,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AppConfigModule, ENV, type Env } from './config/config.module';
 import { AiModule } from './modules/ai/ai.module';
+import { ApplicationsModule } from './modules/applications/applications.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CvModule } from './modules/cv/cv.module';
@@ -78,6 +79,7 @@ import { UsersModule } from './modules/users/users.module';
     UsersModule,
     CvModule,
     JobsModule,
+    ApplicationsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

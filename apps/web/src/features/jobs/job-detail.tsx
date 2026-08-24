@@ -27,9 +27,13 @@ import { formatDate } from '@/lib/utils';
 export function JobDetailDrawer({
   jobId,
   onClose,
+  onTrackApplication,
+  isTracking = false,
 }: {
   jobId: string | null;
   onClose(): void;
+  onTrackApplication?: (job: JobDetailDto) => void;
+  isTracking?: boolean;
 }): React.ReactElement | null {
   const detail = useQuery({
     queryKey: ['job', jobId],
@@ -118,13 +122,32 @@ export function JobDetailDrawer({
               <div className="whitespace-pre-wrap text-sm leading-relaxed">{job.description}</div>
             </section>
 
-            <div className="sticky bottom-0 flex gap-2 border-t border-border bg-background/95 py-4 backdrop-blur">
+            <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-background/95 py-4 backdrop-blur">
+              {/*
+                Applying opens the employer's own page. Nothing here submits
+                on the user's behalf: none of the configured sources permit
+                programmatic application, and an "auto-apply" that quietly
+                broke a platform's terms would put the user's account at risk,
+                not ours.
+              */}
               <Button asChild>
                 <a href={job.applicationUrl} target="_blank" rel="noopener noreferrer">
                   Apply on {job.sourceDisplayName}
                   <ExternalLink className="size-4" aria-hidden />
                 </a>
               </Button>
+
+              {job.applicationId ? (
+                <span className="text-sm text-muted-foreground">Tracked in your applications.</span>
+              ) : (
+                <Button
+                  variant="outline"
+                  disabled={isTracking}
+                  onClick={() => onTrackApplication?.(job)}
+                >
+                  {isTracking ? 'Adding…' : 'Track this application'}
+                </Button>
+              )}
             </div>
           </div>
         )}

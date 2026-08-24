@@ -78,6 +78,18 @@ export default function JobsPage(): React.ReactElement {
     onError: (error: unknown) => toast.error(describeError(error)),
   });
 
+  const trackApplication = useMutation({
+    mutationFn: (jobId: string) =>
+      apiFetch<{ id: string }>('/applications', { method: 'POST', body: { jobId } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      await queryClient.invalidateQueries({ queryKey: ['job', detailJobId] });
+      await queryClient.invalidateQueries({ queryKey: ['applications'] });
+      toast.success('Tracking this application. Update its status from the Applications page.');
+    },
+    onError: (error: unknown) => toast.error(describeError(error)),
+  });
+
   const search = useMutation({
     mutationFn: (request: JobSearchRequest) =>
       apiFetch<JobSearchResultDto>('/jobs/search', { method: 'POST', body: request }),
@@ -183,7 +195,12 @@ export default function JobsPage(): React.ReactElement {
         onBulkGenerateCv={(jobIds) => bulkAction.mutate({ action: 'generate-cv', jobIds })}
       />
 
-      <JobDetailDrawer jobId={detailJobId} onClose={() => setDetailJobId(null)} />
+      <JobDetailDrawer
+        jobId={detailJobId}
+        onClose={() => setDetailJobId(null)}
+        isTracking={trackApplication.isPending}
+        onTrackApplication={(job) => trackApplication.mutate(job.id)}
+      />
     </div>
   );
 }
