@@ -31,6 +31,7 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   const values = new Map<string, string>();
   let admin = false;
+  let allowWeakPassword = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
@@ -39,6 +40,14 @@ function parseArgs(argv: string[]): Args {
     if (token === '--') continue;
     if (token === '--admin') {
       admin = true;
+      continue;
+    }
+    // Registration enforces the full strength rule; sign-in only checks the
+    // hash. So a weak password set here does work — which is exactly why the
+    // escape hatch is explicit and named rather than a silent difference in
+    // behaviour between this script and the sign-up form.
+    if (token === '--allow-weak-password') {
+      allowWeakPassword = true;
       continue;
     }
     if (token?.startsWith('--')) {
@@ -56,13 +65,20 @@ function parseArgs(argv: string[]): Args {
   const password = values.get('password');
   if (!email || !password) {
     throw new Error(
-      'Usage: --email <address> --password <password> [--name <full name>] [--admin]',
+      'Usage: --email <address> --password <password> [--name <full name>] [--admin] [--allow-weak-password]',
     );
+  }
+
+  if (allowWeakPassword && password.length < 8) {
+    // Even the escape hatch has a floor. Below this the account is not
+    // "conveniently weak", it is guessable in seconds by anyone who finds the
+    // login page.
+    throw new Error('Even with --allow-weak-password, use at least 8 characters.');
   }
 
   return {
     email: check(EmailSchema, email, 'email'),
-    password: check(PasswordSchema, password, 'password'),
+    password: allowWeakPassword ? password : check(PasswordSchema, password, 'password'),
     name: values.get('name') ?? 'JobPilot User',
     admin,
   };
