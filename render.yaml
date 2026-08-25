@@ -1,0 +1,127 @@
+# Render Blueprint for the JobPilot API.
+#
+# Render → New → Blueprint → pick this repository. Everything below is applied
+# automatically; the only manual step is filling in the secrets, which Render
+# prompts for because they are marked `sync: false`.
+#
+# Secrets are deliberately NOT in this file. It is committed to git, and a
+# database password or OAuth secret in version control is a leak that survives
+# every later attempt to remove it.
+
+services:
+  - type: web
+    name: jobpilot-api
+    runtime: node
+    plan: free
+    # Neon lives in AWS us-east-1. Virginia is the nearest Render region, and
+    # the round trip matters: every request makes several queries, and from
+    # further away that alone adds hundreds of milliseconds.
+    region: virginia
+    branch: main
+    autoDeploy: true
+
+    # The build context is the repository root, not apps/api — the API depends
+    # on six workspace packages and pnpm has to see the whole workspace to
+    # resolve them.
+    #
+    # Built in dependency order: each package compiles against the previous
+    # one's emitted declarations rather than its source.
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @jobpilot/database generate &&
+      pnpm --filter @jobpilot/shared build &&
+      pnpm --filter @jobpilot/database build &&
+      pnpm --filter @jobpilot/cv build &&
+      pnpm --filter @jobpilot/ai build &&
+      pnpm --filter @jobpilot/job-sources build &&
+      pnpm --filter @jobpilot/api build &&
+      pnpm --filter @jobpilot/database exec prisma migrate deploy
+
+    # Started from apps/api so the working directory matches the Docker image,
+    # which is what STORAGE_LOCAL_PATH and the config loader resolve against.
+    startCommand: cd apps/api && node dist/main.js
+
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: API_GLOBAL_PREFIX
+        value: api
+      - key: THROTTLE_ENABLED
+        value: 'true'
+
+      # The browser never talks to this service directly — Next proxies to it —
+      # so the cookie is first-party on the web app's own domain and Lax holds.
+      - key: COOKIE_SAMESITE
+        value: lax
+
+      # Render's disk is ephemeral: uploaded CVs are lost on every redeploy and
+      # on the free plan's idle spin-down. Switch to s3 once there is a bucket;
+      # the parsed CV lives in Postgres either way, so only the original file
+      # is affected.
+      - key: STORAGE_DRIVER
+        value: local
+
+      # Keyword scoring and a placeholder for tailoring, both clearly labelled
+      # as such in the UI. Set a real provider and key to enable the AI paths.
+      - key: LLM_PROVIDER
+        value: mock
+
+      - key: HTTP_USER_AGENT
+        value: JobPilot/0.1 (+https://github.com/usamanadeem786/JobPilot)
+      - key: RESPECT_ROBOTS_TXT
+        value: 'true'
+      - key: SOURCE_REQUESTS_PER_MINUTE
+        value: '30'
+
+      # Public board slugs, not credentials.
+      - key: GREENHOUSE_BOARD_TOKENS
+        value: stripe,figma,gitlab
+      - key: LEVER_COMPANY_SLUGS
+        value: plaid,ro
+
+      # --- Filled in by you -------------------------------------------------
+      # Render prompts for each of these when the blueprint is applied.
+
+      # Neon. DATABASE_URL is the pooled string (host contains "-pooler");
+      # DIRECT_URL is the unpooled one, used only for migrations.
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+
+      # Generate fresh values rather than copying them from a laptop:
+      #   openssl rand -base64 48
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+
+      # This one must match the existing value, not be regenerated: it decrypts
+      # data already written to the database.
+      - key: ENCRYPTION_KEY
+        sync: false
+
+      # Both URLs point at the WEB app, which proxies /api through to here.
+      # OAUTH_CALLBACK_BASE_URL ends in /api/auth; the provider callback is
+      # that plus /oauth/<provider>/callback, and that exact URL has to be
+      # registered with Google and GitHub.
+      - key: WEB_APP_URL
+        sync: false
+      - key: OAUTH_CALLBACK_BASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_OAUTH_CLIENT_ID
+        sync: false
+      - key: GITHUB_OAUTH_CLIENT_SECRET
+        sync: false
