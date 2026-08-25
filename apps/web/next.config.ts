@@ -60,6 +60,30 @@ function fromRootEnv(key: string): string | undefined {
 
 const apiProxyTarget = fromRootEnv('API_PROXY_TARGET')?.trim().replace(/\/+$/, '');
 
+/**
+ * Whether the proxy target is this very deployment.
+ *
+ * Vercel exposes both the immutable deployment host and the production alias;
+ * either can be what someone pasted in. Compared by host so a trailing slash,
+ * a path or http-versus-https does not hide the match.
+ */
+function pointsAtThisDeployment(target: string): boolean {
+  const own = [process.env.VERCEL_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.replace(/^https?:\/\//, '').replace(/\/.*$/, '').toLowerCase());
+
+  if (own.length === 0) return false;
+
+  let host: string;
+  try {
+    host = new URL(target.includes('://') ? target : `https://${target}`).host.toLowerCase();
+  } catch {
+    return false;
+  }
+
+  return own.includes(host);
+}
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
@@ -87,6 +111,23 @@ const nextConfig: NextConfig = {
       // and 404, which the API client reports as a configuration problem —
       // far more diagnosable than silently posting to the visitor's own
       // machine, which is what a localhost fallback does.
+      return [];
+    }
+
+    if (pointsAtThisDeployment(apiProxyTarget)) {
+      // Refusing beats obeying. A rewrite from /api to this same host forwards
+      // to itself, and the platform answers every API call with
+      // 508 INFINITE_LOOP_DETECTED — a message that names no cause and sends
+      // people looking at their backend, which is not even involved.
+      //
+      // Skipping the rewrite instead produces the ordinary "no API configured"
+      // path, and this line is in the build log to say why.
+      console.error(
+        `\n[jobpilot] API_PROXY_TARGET is set to ${apiProxyTarget}, which is this ` +
+          'deployment itself. That would make /api forward to itself forever, so no ' +
+          'rewrite was generated. Point it at the API service, e.g. ' +
+          'https://jobpilot-api.onrender.com, and redeploy.\n',
+      );
       return [];
     }
 
