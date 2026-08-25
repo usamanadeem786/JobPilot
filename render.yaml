@@ -26,8 +26,11 @@ services:
     #
     # Built in dependency order: each package compiles against the previous
     # one's emitted declarations rather than its source.
+    # No `corepack enable`. Render ships pnpm at /usr/bin/pnpm on a read-only
+    # filesystem, and corepack tries to unlink it to install its own shim:
+    #   Internal Error: EROFS: read-only file system, unlink '/usr/bin/pnpm'
+    # The preinstalled pnpm reads this lockfile (v9.0) perfectly well.
     buildCommand: >-
-      corepack enable &&
       pnpm install --frozen-lockfile &&
       pnpm --filter @jobpilot/database generate &&
       pnpm --filter @jobpilot/shared build &&
@@ -45,6 +48,11 @@ services:
     healthCheckPath: /api/health
 
     envVars:
+      # Pinned. `engines` only says >=22, and Render otherwise picks the newest
+      # release available — it chose 26.7.0, which is far ahead of anything
+      # this dependency tree has been tested against.
+      - key: NODE_VERSION
+        value: '22.11.0'
       - key: NODE_ENV
         value: production
       - key: LOG_LEVEL
